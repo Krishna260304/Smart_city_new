@@ -28,11 +28,9 @@ const DemoLogin = () => {
       const data = await response.json();
 
       if (data.success && data.data.token) {
-        // Store token and user info
         localStorage.setItem('auth_token', data.data.token);
         localStorage.setItem('user', JSON.stringify(data.data.user));
 
-        // Redirect to dashboard
         navigate('/dashboard');
       } else {
         setError(data.error || 'Login failed');

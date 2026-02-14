@@ -344,7 +344,7 @@ const Dashboard = () => {
                     <div className="text-xs text-muted-foreground uppercase tracking-wide">Location</div>
                     <div className="text-sm text-foreground mt-1 font-medium">{selected.location}</div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      📍 {selected.latitude ?? '-'}, {selected.longitude ?? '-'}
+                       {selected.latitude ?? '-'}, {selected.longitude ?? '-'}
                     </div>
                   </div>
                   {selected.imageUrl && (

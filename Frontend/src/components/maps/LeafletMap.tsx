@@ -3,8 +3,6 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.heat';
-
-// Fix for default marker icons in React Leaflet (assets issues)
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
@@ -36,7 +34,6 @@ type LeafletMapProps = {
   height?: string;
 };
 
-// Component to handle auto-fitting bounds to markers
 const FitBounds = ({ markers }: { markers: MapMarker[] }) => {
   const map = useMap();
 
@@ -50,17 +47,14 @@ const FitBounds = ({ markers }: { markers: MapMarker[] }) => {
   return null;
 };
 
-// Component to handle the heatmap layer
 const HeatmapLayer = ({ points, showHeatmap }: { points: any[], showHeatmap: boolean }) => {
   const map = useMap();
 
   useEffect(() => {
     if (!showHeatmap || points.length === 0) return;
 
-    // Format points for leaflet.heat: [lat, lng, intensity]
     const heatPoints = points.map((p) => [p.lat, p.lng, p.weight || 1]);
     
-    // @ts-ignore - leaflet.heat extends L but types might be missing
     const heatLayer = L.heatLayer(heatPoints, {
       radius: 25,
       blur: 15,

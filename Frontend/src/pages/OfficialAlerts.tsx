@@ -12,7 +12,6 @@ export default function OfficialAlerts() {
   const { incidents, loading } = useIncidents();
   const [filter, setFilter] = useState<'all' | 'critical' | 'recent'>('all');
 
-  // Filter and sort incidents for the alert feed
   const activeAlerts = useMemo(() => {
     let sorted = [...incidents].sort((a, b) => 
       new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime()
@@ -21,12 +20,10 @@ export default function OfficialAlerts() {
     if (filter === 'critical') {
       sorted = sorted.filter(i => i.priority === 'High' || i.priority === 'Critical');
     }
-    // 'recent' is just the default sort (newest first)
     
     return sorted;
   }, [incidents, filter]);
 
-  // Convert incidents to map markers
   const mapMarkers = useMemo(() => {
     return activeAlerts
       .filter(i => i.latitude && i.longitude)
@@ -77,10 +74,8 @@ export default function OfficialAlerts() {
           </div>
         </div>
 
-        {/* Main Content Grid */}
         <div className="grid lg:grid-cols-3 gap-6 flex-1 min-h-0">
           
-          {/* Left Column: Alert Feed */}
           <Card className="lg:col-span-1 flex flex-col border-border/60 shadow-md h-full overflow-hidden">
             <CardHeader className="pb-3 border-b border-border/50 shrink-0 bg-muted/20">
               <CardTitle className="text-lg flex justify-between items-center">
@@ -147,18 +142,14 @@ export default function OfficialAlerts() {
             </CardContent>
           </Card>
 
-          {/* Right Column: Map Visualization */}
           <div className="lg:col-span-2 h-full min-h-[400px] rounded-xl overflow-hidden border border-border shadow-md relative">
-             {/* Map Component */}
              <LeafletMap 
                markers={mapMarkers}
-               center={{ lat: 20.5937, lng: 78.9629 }} // Default Center (Update to your city)
+               center={{ lat: 20.5937, lng: 78.9629 }} 
                zoom={13}
                height="100%"
-               showHeatmap={false} // Clean view for alerts
+               showHeatmap={false} s
              />
-             
-             {/* Map Overlay Stats */}
              <div className="absolute top-4 right-4 z-[400] bg-background/90 backdrop-blur px-4 py-2 rounded-lg border shadow-sm text-xs font-medium">
                <div className="flex gap-4">
                  <div className="flex items-center gap-1">

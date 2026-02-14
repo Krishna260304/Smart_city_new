@@ -96,7 +96,6 @@ const OfficialMap = () => {
           </div>
         </div>
 
-        {/* REPLACED: GoogleMap with LeafletMap */}
         <LeafletMap
           markers={markers}
           heatmapPoints={heatmapPoints}
