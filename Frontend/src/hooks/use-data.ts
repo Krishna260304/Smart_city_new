@@ -39,8 +39,13 @@ export const useIncidents = () => {
     if (!hasAuthToken()) {
       return;
     }
-    const base = API_CONFIG.BASE_URL.replace(/^http/, 'ws').replace(/\/api\/?$/, '');
-    const socket = new WebSocket(`${base}/ws/incidents`);
+    
+    // Construct WebSocket URL - always use localhost:8000 for backend
+    const wsUrl = import.meta.env.DEV 
+      ? 'ws://localhost:8000/ws/incidents'
+      : 'wss://127.0.0.1:8000/ws/incidents';
+    
+    const socket = new WebSocket(wsUrl);
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
