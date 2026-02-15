@@ -14,6 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import ReportIncident from "./pages/ReportIncident";
 import OfficialDashboard from "./pages/OfficialDashboard";
 import OfficialMap from "./pages/OfficialMap";
+import OfficialAlerts from "./pages/OfficialAlerts";
 import NotFound from "./pages/NotFound";
 import Analytics from "./pages/Analytics";
 import Reports from "./pages/Reports";
@@ -52,7 +53,7 @@ const App = () => (
             
             <Route path="/official/reports" element={<Reports />} />
             
-            <Route path="/official/alerts" element={<OfficialDashboard />} />
+            <Route path="/official/alerts" element={<OfficialAlerts />} />
             <Route path="/official/settings" element={<OfficialDashboard />} />
           </Route>
 
