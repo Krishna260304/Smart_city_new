@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, UserPlus, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,19 +16,31 @@ import { authService } from '@/services/auth';
 
 export const RegisterForm = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [userType, setUserType] = useState<UserType>('local');
+
+  const requestedUserType: UserType =
+    searchParams.get('type') === 'official' ? 'official' : 'local';
+
+  const [userType, setUserType] = useState<UserType>(requestedUserType);
 
   const form = useForm<RegistrationFormData>({
     resolver: zodResolver(registrationSchema),
     mode: 'onBlur',
     defaultValues: {
-      userType: 'local',
+      userType: requestedUserType,
     },
   });
+
+  const { setValue } = form;
+
+  useEffect(() => {
+    setUserType(requestedUserType);
+    setValue('userType', requestedUserType);
+  }, [requestedUserType, setValue]);
 
   const password = form.watch('password', '');
   

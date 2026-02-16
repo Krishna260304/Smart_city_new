@@ -307,14 +307,14 @@ const Index = () => {
             Join thousands of citizens and authorities working together for a better community.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link to="/register">
+            <Link to="/register?type=local">
               <Button size="lg" className="bg-white text-primary hover:bg-white/90 w-48">
                 Register as Citizen
               </Button>
             </Link>
-            <Link to="/login?type=official">
+            <Link to="/register?type=official">
               <Button size="lg" variant="outline" className="border-2 border-white text-primary hover:bg-white/10 w-48">
-                Official Login
+                Register as Official
               </Button>
             </Link>
           </div>
