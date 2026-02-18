@@ -139,6 +139,17 @@ def _clean(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
+def _resolve_hf_pipeline_device() -> tuple[int, str]:
+    try:
+        import torch  # type: ignore
+
+        if torch.cuda.is_available():
+            return 0, "cuda:0"
+    except Exception as exc:
+        LOGGER.debug("Torch CUDA detection failed, falling back to CPU: %s", exc)
+    return -1, "cpu"
+
+
 def _normalize_scores(raw: dict[str, float]) -> dict[str, float]:
     floor = 1e-6
     # Apply power scaling to make differences more pronounced (confidence boost)
@@ -190,12 +201,17 @@ class _ZeroShotPriorityModel:
 
                 from transformers import pipeline  # type: ignore
 
+                device_id, device_name = _resolve_hf_pipeline_device()
                 self._pipeline = pipeline(
                     "zero-shot-classification",
                     model=settings.PRIORITY_AI_MODEL,
-                    device=-1,
+                    device=device_id,
                 )
-                LOGGER.info("Incident priority AI model loaded: %s", settings.PRIORITY_AI_MODEL)
+                LOGGER.info(
+                    "Incident priority AI model loaded: %s (device=%s)",
+                    settings.PRIORITY_AI_MODEL,
+                    device_name,
+                )
             except Exception as exc:
                 LOGGER.warning(
                     "Failed to load incident priority AI model (%s). Falling back to heuristic scorer. Error: %s",
@@ -378,3 +394,21 @@ def predict_incident_priority(
         source=source,
         location=location,
     )
+
+
+def warmup_priority_model() -> PriorityPrediction:
+    prediction = _classifier.predict(
+        title="Startup warmup incident",
+        description="System startup warmup for incident priority model.",
+        category="system",
+        severity="low",
+        source="startup",
+        location="N/A",
+    )
+    LOGGER.info(
+        "Incident priority model warmup completed. source=%s priority=%s confidence=%s",
+        prediction.source,
+        prediction.priority,
+        prediction.confidence,
+    )
+    return prediction

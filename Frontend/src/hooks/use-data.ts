@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { incidentService, Incident, IncidentStats } from '@/services/incidents';
+import { incidentService, Incident, IncidentStats, normalizeIncidentMedia } from '@/services/incidents';
 import { ticketService, Ticket, TicketStats } from '@/services/tickets';
 import { API_CONFIG } from '@/config/api';
 import {
@@ -61,12 +61,13 @@ export const useIncidents = () => {
       try {
         const payload = JSON.parse(event.data);
         if (payload?.type === 'NEW_INCIDENT' && payload.data) {
+          const normalizedIncident = normalizeIncidentMedia(payload.data as Incident);
           setIncidents((prev) => {
-            const exists = prev.find((i) => i.id === payload.data.id);
+            const exists = prev.find((i) => i.id === normalizedIncident.id);
             if (exists) {
-              return prev.map((i) => (i.id === payload.data.id ? payload.data : i));
+              return prev.map((i) => (i.id === normalizedIncident.id ? normalizedIncident : i));
             }
-            return [payload.data, ...prev];
+            return [normalizedIncident, ...prev];
           });
         }
       } catch {
@@ -117,14 +118,16 @@ export const useTickets = (filters?: { status?: string; priority?: string; categ
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchTickets = async () => {
+  const fetchTickets = async (silent = false) => {
     if (!hasAuthToken()) {
       setTickets([]);
       setLoading(false);
       setError(null);
       return;
     }
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
     setError(null);
     const response = await ticketService.getTickets(filters);
 
@@ -133,11 +136,25 @@ export const useTickets = (filters?: { status?: string; priority?: string; categ
     } else {
       setError(response.error || 'Failed to fetch tickets');
     }
-    setLoading(false);
+    if (!silent) {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     fetchTickets();
+  }, [filters?.status, filters?.priority, filters?.category]);
+
+  useEffect(() => {
+    if (!hasAuthToken()) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      void fetchTickets(true);
+    }, 15000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [filters?.status, filters?.priority, filters?.category]);
 
   return { tickets, loading, error, refetch: fetchTickets };

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -6,9 +6,7 @@ import { z } from 'zod';
 import { 
   Camera, 
   MapPin, 
-  Upload, 
   X, 
-  Image as ImageIcon,
   Send,
   AlertTriangle
 } from 'lucide-react';
@@ -18,15 +16,22 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { incidentService } from '@/services/incidents';
+import { LocationPickerMap, PickedLocation } from '@/components/maps/LocationPickerMap';
 
 const incidentSchema = z.object({
   title: z.string().trim().min(10, 'Title must be at least 10 characters').max(100, 'Title too long'),
   description: z.string().trim().min(20, 'Description must be at least 20 characters').max(1000, 'Description too long'),
   category: z.string().min(1, 'Please select a category'),
-  priority: z.string().min(1, 'Please select priority'),
   address: z.string().trim().min(10, 'Please enter complete address').max(200, 'Address too long'),
   pincode: z.string().regex(/^\d{6}$/, 'Enter valid 6-digit pincode'),
 });
@@ -45,12 +50,20 @@ const categories = [
   { value: 'other', label: 'Other' },
 ];
 
-const priorities = [
-  { value: 'low', label: 'Low - Minor inconvenience' },
-  { value: 'medium', label: 'Medium - Needs attention' },
-  { value: 'high', label: 'High - Urgent issue' },
-  { value: 'critical', label: 'Critical - Emergency' },
-];
+type GpsCoords = {
+  lat: number;
+  lon: number;
+  accuracy?: number;
+  source: 'live_gps' | 'map_pick';
+};
+
+const getGpsErrorMessage = (error: GeolocationPositionError | null) => {
+  if (!error) return 'Unable to fetch device GPS location.';
+  if (error.code === error.PERMISSION_DENIED) return 'Location permission denied. Enable GPS/location access and try again.';
+  if (error.code === error.POSITION_UNAVAILABLE) return 'Device GPS location is unavailable.';
+  if (error.code === error.TIMEOUT) return 'Timed out while fetching GPS location.';
+  return 'Unable to fetch device GPS location.';
+};
 
 const ReportIncident = () => {
   const navigate = useNavigate();
@@ -58,7 +71,10 @@ const ReportIncident = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [images, setImages] = useState<{ file: File; preview: string }[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [coords, setCoords] = useState<GpsCoords | null>(null);
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [locationDraft, setLocationDraft] = useState<GpsCoords | null>(null);
   const [locationError, setLocationError] = useState('');
 
   const form = useForm<IncidentFormData>({
@@ -78,21 +94,69 @@ const ReportIncident = () => {
     setImages(prev => [...prev, ...newImages]);
   };
 
+  const fetchGpsLocation = useCallback(
+    async (showErrorToast = false): Promise<GpsCoords | null> => {
+      if (!navigator.geolocation) {
+        const message = 'Geolocation is not supported on this device/browser.';
+        setLocationError(message);
+        if (showErrorToast) {
+          toast({
+            title: 'GPS Required',
+            description: message,
+            variant: 'destructive',
+          });
+        }
+        return null;
+      }
+
+      setIsLocating(true);
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0,
+          });
+        });
+        const gpsCoords: GpsCoords = {
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          source: 'live_gps',
+        };
+        setLocationError('');
+        return gpsCoords;
+      } catch (error) {
+        const geoError =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? (error as GeolocationPositionError)
+            : null;
+        const message = getGpsErrorMessage(geoError);
+        setLocationError(message);
+        if (showErrorToast) {
+          toast({
+            title: 'GPS Required',
+            description: message,
+            variant: 'destructive',
+          });
+        }
+        return null;
+      } finally {
+        setIsLocating(false);
+      }
+    },
+    [toast],
+  );
+
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation not supported');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-      },
-      () => {
-        setLocationError('Location permission denied');
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  }, []);
+    const loadInitialGps = async () => {
+      const gps = await fetchGpsLocation(false);
+      if (gps) {
+        setCoords(gps);
+      }
+    };
+    void loadInitialGps();
+  }, [fetchGpsLocation]);
 
   const removeImage = (index: number) => {
     setImages(prev => {
@@ -116,23 +180,33 @@ const ReportIncident = () => {
     setIsSubmitting(true);
 
     try {
+      if (!coords) {
+        setLocationDialogOpen(true);
+        toast({
+          title: "Location Required",
+          description: "Select location using live GPS or map picker before submitting.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const incidentData = {
         title: data.title,
         description: data.description,
         category: data.category,
-        priority: data.priority,
         location: `${data.address}, Pincode: ${data.pincode}`,
-        latitude: coords?.lat ?? 0,
-        longitude: coords?.lon ?? 0,
+        latitude: coords.lat,
+        longitude: coords.lon,
         images: images.map(img => img.file),
       };
 
       const response = await incidentService.createIncident(incidentData);
 
       if (response.success) {
+        const incidentId = response.data?.id ? `Incident ID: ${response.data.id}. ` : '';
         toast({
           title: "Report Submitted!",
-          description: "Your incident report has been submitted successfully. You'll receive updates on its progress.",
+          description: `${incidentId}Your incident report has been submitted successfully. You'll receive updates on its progress.`,
         });
         navigate('/dashboard');
       } else {
@@ -143,14 +217,50 @@ const ReportIncident = () => {
         });
       }
     } catch (error) {
+      const fallback = "Unable to connect to server. Please try again.";
+      const message = error instanceof Error && error.message ? error.message : fallback;
       toast({
         title: "Submission Failed",
-        description: "Unable to connect to server. Please try again.",
+        description: message,
         variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const openLocationDialog = () => {
+    setLocationDraft(coords);
+    setLocationDialogOpen(true);
+  };
+
+  const updateDraftFromMap = (picked: PickedLocation) => {
+    setLocationDraft({
+      lat: picked.lat,
+      lon: picked.lon,
+      source: 'map_pick',
+    });
+    setLocationError('');
+  };
+
+  const useLiveGpsInDialog = async () => {
+    const gps = await fetchGpsLocation(true);
+    if (gps) {
+      setLocationDraft(gps);
+    }
+  };
+
+  const saveLocationFromDialog = () => {
+    if (!locationDraft) {
+      toast({
+        title: "Location Required",
+        description: "Pick a point on map or use live GPS.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setCoords(locationDraft);
+    setLocationDialogOpen(false);
   };
 
   return (
@@ -249,8 +359,8 @@ const ReportIncident = () => {
             )}
           </div>
 
-          {/* Category & Priority */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Category */}
+          <div className="space-y-2">
             <div className="space-y-2">
               <Label>Category *</Label>
               <Select onValueChange={(val) => form.setValue('category', val)}>
@@ -273,29 +383,9 @@ const ReportIncident = () => {
                 </p>
               )}
             </div>
-
-            <div className="space-y-2">
-              <Label>Priority *</Label>
-              <Select onValueChange={(val) => form.setValue('priority', val)}>
-                <SelectTrigger className={cn(
-                  form.formState.errors.priority && "border-destructive"
-                )}>
-                  <SelectValue placeholder="Select priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  {priorities.map(p => (
-                    <SelectItem key={p.value} value={p.value}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.priority && (
-                <p className="text-sm text-destructive">
-                  {form.formState.errors.priority.message}
-                </p>
-              )}
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Priority is assigned automatically by the AI model after submission.
+            </p>
           </div>
 
           {/* Location */}
@@ -304,9 +394,42 @@ const ReportIncident = () => {
             <MapPin className="h-5 w-5 text-primary" />
             <span className="font-medium">Location Details</span>
           </div>
+          <div className="rounded-lg border border-border bg-background p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-muted-foreground">
+                {coords
+                  ? `Selected (${coords.source === 'live_gps' ? 'Live GPS' : 'Map Picker'}): ${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}${
+                      typeof coords.accuracy === 'number' ? ` (accuracy +/-${Math.round(coords.accuracy)}m)` : ''
+                    }`
+                  : 'No location selected yet. Use live GPS or map picker.'}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const gps = await fetchGpsLocation(true);
+                    if (gps) {
+                      setCoords(gps);
+                    }
+                  }}
+                  disabled={isSubmitting || isLocating}
+                >
+                  {isLocating ? 'Locating...' : 'Use Live GPS'}
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={openLocationDialog} disabled={isSubmitting}>
+                  Select on Map
+                </Button>
+              </div>
+            </div>
+          </div>
           {locationError && (
-            <p className="text-xs text-muted-foreground">{locationError}</p>
+            <p className="text-xs text-destructive">{locationError}</p>
           )}
+          <p className="text-xs text-muted-foreground">
+            You can submit using either live GPS location or a map-selected point.
+          </p>
 
             <div className="space-y-2">
               <Label htmlFor="address">Complete Address *</Label>
@@ -371,7 +494,7 @@ const ReportIncident = () => {
             <Button
               type="submit"
               className="flex-1 gradient-primary hover:opacity-90"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isLocating}
             >
               {isSubmitting ? (
                 <div className="flex items-center gap-2">
@@ -388,6 +511,60 @@ const ReportIncident = () => {
           </div>
         </form>
       </div>
+
+      <Dialog
+        open={locationDialogOpen}
+        onOpenChange={(open) => {
+          setLocationDialogOpen(open);
+          if (!open) {
+            setLocationDraft(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Select Incident Location</DialogTitle>
+            <DialogDescription>
+              Choose one option: use live GPS or tap/click on map to pin exact location.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs text-muted-foreground">
+                {locationDraft
+                  ? `Draft: ${locationDraft.lat.toFixed(6)}, ${locationDraft.lon.toFixed(6)} (${locationDraft.source === 'live_gps' ? 'Live GPS' : 'Map Picker'})`
+                  : 'No draft location selected.'}
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => void useLiveGpsInDialog()} disabled={isLocating}>
+                {isLocating ? 'Locating...' : 'Use Live GPS'}
+              </Button>
+            </div>
+
+            <LocationPickerMap
+              value={locationDraft ? { lat: locationDraft.lat, lon: locationDraft.lon } : null}
+              onChange={updateDraftFromMap}
+              height="360px"
+            />
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setLocationDialogOpen(false);
+                  setLocationDraft(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="button" onClick={saveLocationFromDialog}>
+                Use Selected Location
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

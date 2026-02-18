@@ -59,6 +59,8 @@ export const API_ENDPOINTS = {
     GET_BY_ID: (id: string) => `/tickets/${id}`,
     UPDATE_STATUS: (id: string) => `/tickets/${id}/status`,
     ASSIGN: (id: string) => `/tickets/${id}/assign`,
+    PROGRESS_UPDATE: (id: string) => `/tickets/${id}/progress-update`,
+    LOGBOOK: (id: string) => `/tickets/${id}/logbook`,
     STATS: '/tickets/stats',
   },
 
@@ -70,6 +72,7 @@ export const API_ENDPOINTS = {
   USERS: {
     PROFILE: '/users/profile',
     UPDATE_PROFILE: '/users/profile',
+    WORKERS: '/users/workers',
   },
 
   ANALYTICS: {

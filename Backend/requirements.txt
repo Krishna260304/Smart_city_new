@@ -6,3 +6,5 @@ passlib[bcrypt]
 pydantic
 python-multipart
 python-dotenv
+transformers
+torch

@@ -37,6 +37,7 @@ export default function OfficialAlerts() {
       .filter(i => i.latitude && i.longitude)
       .map(i => ({
         id: i.id,
+        entityId: i.id,
         position: { lat: i.latitude, lng: i.longitude },
         title: i.title,
         description: i.description,
@@ -115,7 +116,10 @@ export default function OfficialAlerts() {
                     )}
                   >
                     <div className="flex justify-between items-start mb-1">
-                      <span className="font-semibold text-sm line-clamp-1">{alert.title}</span>
+                      <div className="min-w-0">
+                        <span className="font-semibold text-sm line-clamp-1 block">{alert.title}</span>
+                        <span className="text-[10px] text-muted-foreground">ID: {alert.id}</span>
+                      </div>
                       <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
                         {new Date(alert.createdAt || '').toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                       </span>

@@ -1,5 +1,6 @@
 export type UserType = 'local' | 'official';
 export type LoginMethod = 'email' | 'phone';
+export type OfficialRole = 'department' | 'supervisor' | 'field_inspector' | 'worker';
 
 export interface User {
   id: string;
@@ -7,6 +8,8 @@ export interface User {
   phone: string;
   fullName: string;
   userType: UserType;
+  officialRole?: OfficialRole;
+  workerSpecialization?: string;
   address?: string;
   pincode?: string;
   createdAt: Date;

@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from app.config.settings import settings
 from app.database import users
+from app.roles import normalize_official_role
 from app.utils import serialize_doc
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -62,3 +63,16 @@ def get_official_user(current_user: dict = Depends(get_current_user)):
     if current_user.get("userType") != "official":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Official access required")
     return current_user
+
+
+def require_official_roles(*allowed_roles: str):
+    normalized_allowed = {normalize_official_role(role) for role in allowed_roles}
+    normalized_allowed.discard(None)
+
+    def _dependency(current_user: dict = Depends(get_official_user)):
+        role = normalize_official_role(current_user.get("officialRole"))
+        if role not in normalized_allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role permissions")
+        return current_user
+
+    return _dependency

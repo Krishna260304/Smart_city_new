@@ -44,17 +44,16 @@ const App = () => (
           </Route>
 
           <Route element={<RouteGuard role="official" />}>
-            <Route path="/official/dashboard" element={<OfficialDashboard />} />
-            <Route path="/official/tickets" element={<OfficialDashboard />} />
+            <Route path="/official/dashboard" element={<OfficialDashboard mode="overview" />} />
+            <Route path="/official/tickets" element={<OfficialDashboard mode="tickets" />} />
             <Route path="/official/map" element={<OfficialMap />} />
-            <Route path="/official/personnel" element={<OfficialDashboard />} />
             
             <Route path="/official/analytics" element={<Analytics />} />
             
             <Route path="/official/reports" element={<Reports />} />
             
             <Route path="/official/alerts" element={<OfficialAlerts />} />
-            <Route path="/official/settings" element={<OfficialDashboard />} />
+            <Route path="/official/settings" element={<OfficialDashboard mode="overview" />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />

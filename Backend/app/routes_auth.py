@@ -25,6 +25,12 @@ from app.services.otp_service import (
     PURPOSE_DISABLE_2FA,
 )
 from app.utils import serialize_doc
+from app.roles import (
+    OFFICIAL_ROLES,
+    WORKER_SPECIALIZATIONS,
+    normalize_official_role,
+    normalize_worker_specialization,
+)
 
 router = APIRouter(prefix="/api/auth")
 LOGGER = logging.getLogger(__name__)
@@ -59,6 +65,28 @@ def _send_registration_email_safe(to_email: str, name: str, user_type: str) -> N
 def register(user: RegisterModel, background_tasks: BackgroundTasks):
     if not user.email and not user.phone:
         raise HTTPException(status_code=400, detail="Email or phone required")
+    normalized_user_type = _normalize_user_type(user.userType)
+    normalized_official_role = normalize_official_role(user.officialRole)
+    normalized_worker_specialization = normalize_worker_specialization(user.workerSpecialization)
+
+    if normalized_user_type == "official":
+        if normalized_official_role not in OFFICIAL_ROLES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"officialRole is required and must be one of: {', '.join(OFFICIAL_ROLES)}",
+            )
+        if normalized_official_role == "worker":
+            if normalized_worker_specialization not in WORKER_SPECIALIZATIONS:
+                raise HTTPException(
+                    status_code=400,
+                    detail="workerSpecialization is required for worker accounts",
+                )
+        else:
+            normalized_worker_specialization = None
+    else:
+        normalized_official_role = None
+        normalized_worker_specialization = None
+
     conditions = []
     if user.email:
         conditions.append({"email": user.email})
@@ -67,6 +95,9 @@ def register(user: RegisterModel, background_tasks: BackgroundTasks):
     if conditions and users.find_one({"$or": conditions}):
         raise HTTPException(status_code=400, detail="User exists")
     data = user.dict()
+    data["userType"] = normalized_user_type
+    data["officialRole"] = normalized_official_role
+    data["workerSpecialization"] = normalized_worker_specialization
     data["password"] = hash_password(user.password)
     data["createdAt"] = datetime.utcnow().isoformat()
     data["emailVerified"] = False
@@ -110,6 +141,12 @@ def login(user: LoginModel):
         if expected_user_type == "citizen":
             raise HTTPException(status_code=403, detail="Use official login for official accounts")
         raise HTTPException(status_code=403, detail="Use local login for citizen accounts")
+
+    expected_official_role = normalize_official_role(user.expectedOfficialRole)
+    actual_official_role = normalize_official_role(db_user.get("officialRole"))
+    if expected_user_type == "official" and expected_official_role:
+        if actual_official_role != expected_official_role:
+            raise HTTPException(status_code=403, detail="Use the correct official role login")
 
     if bool(db_user.get("twoFactorEnabled")):
         try:

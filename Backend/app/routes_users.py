@@ -1,8 +1,9 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
-from app.auth import get_current_user
+from app.auth import get_current_user, require_official_roles
 from app.database import users
 from app.models import UserUpdate
+from app.roles import normalize_official_role
 from app.utils import serialize_doc, to_object_id
 from pymongo.errors import DuplicateKeyError
 
@@ -30,4 +31,28 @@ def update_profile(payload: UserUpdate, current_user: dict = Depends(get_current
     data = serialize_doc(user)
     if data:
         data.pop("password", None)
+    return {"success": True, "data": data}
+
+
+@router.get("/workers")
+def list_workers(current_user: dict = Depends(require_official_roles("department", "supervisor"))):
+    rows = list(
+        users.find(
+            {"userType": "official", "officialRole": "worker"},
+            {"name": 1, "phone": 1, "email": 1, "workerSpecialization": 1},
+        ).sort("name", 1)
+    )
+    data = []
+    for row in rows:
+        payload = serialize_doc(row) or {}
+        data.append(
+            {
+                "id": payload.get("id"),
+                "name": payload.get("name") or payload.get("email") or payload.get("phone"),
+                "phone": payload.get("phone"),
+                "email": payload.get("email"),
+                "officialRole": normalize_official_role("worker"),
+                "workerSpecialization": payload.get("workerSpecialization") or "Other",
+            }
+        )
     return {"success": True, "data": data}

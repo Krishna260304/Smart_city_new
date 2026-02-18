@@ -8,12 +8,15 @@ from app.services.ws_manager import manager
 from app.services.image_service import save_image
 from app.services.email_service import send_alert_email, send_incident_submission_email, send_ticket_update_email
 from app.services.notification_service import send_stakeholder_notifications
+from app.services.priority_ai import predict_incident_priority
 from app.issue_model import IssueIn
 from app.auth import get_current_user, get_official_user
+from app.roles import normalize_official_role
 from app.utils import serialize_doc, serialize_list, to_object_id
 
 router = APIRouter(prefix="/api")
 LOGGER = logging.getLogger(__name__)
+PRIORITY_RECALC_FIELDS = {"title", "description", "category", "severity", "scope", "source", "location"}
 
 def _now_iso():
     return datetime.utcnow().isoformat()
@@ -73,6 +76,20 @@ def _normalize_incident_status(value: str | None) -> str | None:
         return "in_progress"
     return status
 
+def _validate_required_coordinates(latitude: float | None, longitude: float | None):
+    if latitude is None or longitude is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Exact GPS coordinates are required. Enable device location and try again.",
+        )
+    if latitude < -90 or latitude > 90 or longitude < -180 or longitude > 180:
+        raise HTTPException(status_code=400, detail="Invalid GPS coordinates")
+    if abs(latitude) < 1e-9 and abs(longitude) < 1e-9:
+        raise HTTPException(
+            status_code=400,
+            detail="Exact GPS coordinates are required. Enable device location and try again.",
+        )
+
 def _resolve_reporter_email(
     reporter_email: str | None,
     reporter_id: str | None,
@@ -124,6 +141,20 @@ def _send_incident_submission_email_safe(
     except Exception as exc:
         LOGGER.warning("Incident submission email delivery failed for %s: %s", to_email, exc)
 
+def _assign_ai_priority(doc: dict):
+    prediction = predict_incident_priority(
+        title=doc.get("title"),
+        description=doc.get("description"),
+        category=doc.get("category"),
+        severity=doc.get("severity"),
+        scope=doc.get("scope"),
+        source=doc.get("source"),
+        location=doc.get("location"),
+    )
+    doc["priority"] = prediction.priority
+    doc["prioritySource"] = prediction.source
+    doc["priorityConfidence"] = prediction.confidence
+
 def _create_ticket_from_incident(doc: dict):
     if not doc:
         return None
@@ -140,6 +171,11 @@ def _create_ticket_from_incident(doc: dict):
         "reporterEmail": doc.get("reporterEmail"),
         "reporterPhone": doc.get("reporterPhone"),
         "assignedTo": doc.get("assignedTo"),
+        "reopenCount": 0,
+        "progressPercent": 0,
+        "progressSource": "awaiting_assignment",
+        "progressConfidence": 1.0,
+        "progressUpdatedAt": doc.get("updatedAt") or _now_iso(),
         "incidentId": str(doc.get("_id")),
         "createdAt": doc.get("createdAt") or _now_iso(),
         "updatedAt": doc.get("updatedAt") or _now_iso()
@@ -215,6 +251,9 @@ async def create_incident(
         )
         data["reporterEmail"] = reporter_email
         data["reporterPhone"] = current_user.get("phone")
+    if not _is_official(current_user):
+        _validate_required_coordinates(data.get("latitude"), data.get("longitude"))
+    _assign_ai_priority(data)
     result = incidents.insert_one(data)
     doc = incidents.find_one({"_id": result.inserted_id})
     ticket_id = _create_ticket_from_incident(doc)
@@ -250,6 +289,7 @@ async def create_incident(
 
 @router.post("/report")
 async def report_issue(issue: IssueIn):
+    _validate_required_coordinates(issue.latitude, issue.longitude)
     image_url = None
     if issue.image:
         try:
@@ -263,7 +303,6 @@ async def report_issue(issue: IssueIn):
         "title": "AI Detected Issue",
         "description": issue.description,
         "category": "ai",
-        "priority": "high",
         "location": f"{issue.latitude}, {issue.longitude}",
         "latitude": issue.latitude,
         "longitude": issue.longitude,
@@ -276,6 +315,7 @@ async def report_issue(issue: IssueIn):
         "updatedAt": now,
         "hasMessages": False
     }
+    _assign_ai_priority(data)
     if image_url:
         data["imageUrls"] = [image_url]
         data["imageUrl"] = image_url
@@ -296,19 +336,36 @@ async def report_issue(issue: IssueIn):
 @router.put("/incidents/{incident_id}")
 @router.put("/issues/{incident_id}")
 def update_incident(incident_id: str, incident: IncidentUpdate, current_user: dict = Depends(get_official_user)):
-    _ = _get_incident_doc(incident_id)
+    existing = _get_incident_doc(incident_id)
     updates = incident.dict(exclude_unset=True, exclude_none=True)
+    role = normalize_official_role(current_user.get("officialRole"))
+    requested_manual_priority = "priority" in updates
+    if requested_manual_priority:
+        updates.pop("priority", None)
     if "status" in updates:
         normalized_status = _normalize_incident_status(updates.get("status"))
         if normalized_status not in {"open", "in_progress", "resolved"}:
             raise HTTPException(status_code=400, detail="Invalid status")
+        if normalized_status in {"open", "resolved"} and role != "department":
+            raise HTTPException(status_code=403, detail="Only department role can reopen or resolve incidents")
+        if normalized_status == "in_progress" and role != "supervisor":
+            raise HTTPException(status_code=403, detail="Only supervisor role can verify incidents")
         updates["status"] = normalized_status
+    if "assignedTo" in updates and role != "supervisor":
+        raise HTTPException(status_code=403, detail="Only supervisor role can assign workers")
     images = updates.pop("images", None)
     if images is not None:
         image_urls = _save_images(images)
         if image_urls:
             updates["imageUrls"] = image_urls
             updates["imageUrl"] = image_urls[0]
+    if requested_manual_priority or any(field in updates for field in PRIORITY_RECALC_FIELDS):
+        merged = dict(existing)
+        merged.update(updates)
+        _assign_ai_priority(merged)
+        updates["priority"] = merged.get("priority")
+        updates["prioritySource"] = merged.get("prioritySource")
+        updates["priorityConfidence"] = merged.get("priorityConfidence")
     updates["updatedAt"] = _now_iso()
     obj_id = to_object_id(incident_id)
     incidents.update_one({"_id": obj_id}, {"$set": updates})

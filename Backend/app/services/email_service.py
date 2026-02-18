@@ -293,3 +293,33 @@ def send_ticket_update_email(to_email: str, title: str, status: str) -> EmailDel
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)
+
+
+def send_field_inspector_reminder_email(
+    to_email: str,
+    inspector_name: str,
+    ticket_id: str,
+    ticket_title: str,
+    due_date: str,
+) -> EmailDeliveryResult:
+    subject = "SafeLive Reminder: Daily Field Update Pending"
+    intro = (
+        f"Hi {inspector_name}, daily ticket progress update is pending. "
+        "Please submit your field update before 6:00 PM IST."
+    )
+    details = [
+        ("Ticket ID", ticket_id or "N/A"),
+        ("Ticket", ticket_title or "N/A"),
+        ("Due date (IST)", due_date or "Today"),
+        ("Action", "Submit inspector update in SafeLive dashboard"),
+    ]
+    text_body = (
+        f"Hi {inspector_name},\n\n"
+        "Your daily field progress update is pending.\n"
+        f"Ticket ID: {details[0][1]}\n"
+        f"Ticket: {details[1][1]}\n"
+        f"Due date (IST): {details[2][1]}\n\n"
+        "Please submit the update before 6:00 PM IST."
+    )
+    html_body = _render_email_frame(title=subject, intro=intro, details=details)
+    return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)

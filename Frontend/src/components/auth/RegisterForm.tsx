@@ -14,6 +14,29 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { authService } from '@/services/auth';
 
+const OFFICIAL_ROLE_OPTIONS = [
+  { value: 'department', label: 'Department' },
+  { value: 'supervisor', label: 'Supervisor' },
+  { value: 'field_inspector', label: 'Field Inspector' },
+  { value: 'worker', label: 'Worker' },
+] as const;
+
+const WORKER_SPECIALIZATIONS = [
+  'Road Maintenance Worker',
+  'Electrician',
+  'Plumber',
+  'Drainage Worker',
+  'Sanitation Worker',
+  'Water Supply Technician',
+  'Technician',
+  'Emergency Response Worker',
+  'Security Officer',
+  'Complaint Manager',
+  'Operations Manager',
+  'General Worker',
+  'Other',
+] as const;
+
 export const RegisterForm = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -40,9 +63,15 @@ export const RegisterForm = () => {
   useEffect(() => {
     setUserType(requestedUserType);
     setValue('userType', requestedUserType);
+    if (requestedUserType !== 'official') {
+      setValue('officialRole', undefined);
+      setValue('workerSpecialization', undefined);
+    }
   }, [requestedUserType, setValue]);
 
   const password = form.watch('password', '');
+  const selectedOfficialRole = form.watch('officialRole');
+  const isWorkerRegistration = userType === 'official' && selectedOfficialRole === 'worker';
   
   const passwordRequirements = [
     { label: 'At least 8 characters', met: password.length >= 8 },
@@ -58,12 +87,17 @@ export const RegisterForm = () => {
     try {
       const response = await authService.register({
         name: data.fullName,
-        email: data.email,
+        email: data.email?.trim() || undefined,
         phone: data.phone,
         password: data.password,
         userType: data.userType === 'local' ? 'citizen' : 'official',
         address: data.address,
         pincode: data.pincode,
+        officialRole: data.userType === 'official' ? data.officialRole : undefined,
+        workerSpecialization:
+          data.userType === 'official' && data.officialRole === 'worker'
+            ? data.workerSpecialization
+            : undefined,
       });
 
       if (response.success) {
@@ -120,9 +154,71 @@ export const RegisterForm = () => {
             onSelectType={(type) => {
               setUserType(type);
               form.setValue('userType', type);
+              if (type !== 'official') {
+                form.setValue('officialRole', undefined);
+                form.setValue('workerSpecialization', undefined);
+              }
             }}
           />
         </div>
+
+        {userType === 'official' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Official Role</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {OFFICIAL_ROLE_OPTIONS.map((role) => (
+                  <button
+                    key={role.value}
+                    type="button"
+                    className={cn(
+                      "h-10 rounded-md border text-sm font-medium transition-colors",
+                      selectedOfficialRole === role.value
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-input hover:bg-muted"
+                    )}
+                    onClick={() => {
+                      form.setValue('officialRole', role.value as RegistrationFormData['officialRole']);
+                      if (role.value !== 'worker') {
+                        form.setValue('workerSpecialization', undefined);
+                      }
+                    }}
+                  >
+                    {role.label}
+                  </button>
+                ))}
+              </div>
+              {form.formState.errors.officialRole && (
+                <p className="text-sm text-destructive">{form.formState.errors.officialRole.message}</p>
+              )}
+            </div>
+
+            {selectedOfficialRole === 'worker' && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="workerSpecialization">Worker Category</Label>
+                <select
+                  id="workerSpecialization"
+                  className={cn(
+                    "h-10 w-full rounded-md border border-input bg-background px-3 text-sm",
+                    form.formState.errors.workerSpecialization && "border-destructive focus-visible:ring-destructive"
+                  )}
+                  value={form.watch('workerSpecialization') || ''}
+                  onChange={(e) => form.setValue('workerSpecialization', e.target.value || undefined)}
+                >
+                  <option value="">Select worker category</option>
+                  {WORKER_SPECIALIZATIONS.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                {form.formState.errors.workerSpecialization && (
+                  <p className="text-sm text-destructive">{form.formState.errors.workerSpecialization.message}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {}
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">

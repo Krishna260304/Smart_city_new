@@ -17,6 +17,7 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 export type MapMarker = {
   id: string;
+  entityId?: string;
   position: { lat: number; lng: number };
   title: string;
   description?: string;
@@ -96,6 +97,9 @@ export const LeafletMap = ({
             <Popup>
               <div className="text-sm">
                 <div className="font-bold mb-1">{marker.title}</div>
+                <div className="mb-1 text-xs text-muted-foreground">
+                  ID: <span className="font-medium text-foreground">{marker.entityId || marker.id}</span>
+                </div>
                 {marker.description && <div className="mb-1">{marker.description}</div>}
                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground">
                   {marker.status && <span>Status: <span className="font-medium text-foreground">{marker.status}</span></span>}

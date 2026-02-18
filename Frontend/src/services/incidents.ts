@@ -1,5 +1,5 @@
 import { apiClient, ApiResponse } from './api';
-import { API_ENDPOINTS } from '@/config/api';
+import { API_CONFIG, API_ENDPOINTS } from '@/config/api';
 
 export interface Incident {
   id: string;
@@ -42,8 +42,8 @@ export interface CreateIncidentData {
   description?: string;
   category: string;
   location: string;
-  latitude?: number;
-  longitude?: number;
+  latitude: number;
+  longitude: number;
   images?: File[];
 }
 
@@ -54,6 +54,48 @@ export interface UpdateIncidentData {
   status?: string;
   location?: string;
 }
+
+const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
+
+const resolveImageUrl = (value?: string): string | undefined => {
+  const raw = (value || '').trim();
+  if (!raw) return undefined;
+  if (ABSOLUTE_URL_PATTERN.test(raw) || raw.startsWith('data:') || raw.startsWith('blob:')) {
+    return raw;
+  }
+
+  const normalizedPath = raw.startsWith('/') ? raw : `/${raw}`;
+  if (API_CONFIG.BASE_URL.startsWith('http://') || API_CONFIG.BASE_URL.startsWith('https://')) {
+    try {
+      const apiUrl = new URL(API_CONFIG.BASE_URL);
+      return `${apiUrl.protocol}//${apiUrl.host}${normalizedPath}`;
+    } catch {
+      return normalizedPath;
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}${normalizedPath}`;
+  }
+
+  return normalizedPath;
+};
+
+export const normalizeIncidentMedia = (incident: Incident): Incident => {
+  const normalizedImageUrls = (incident.imageUrls || [])
+    .map((url) => resolveImageUrl(url))
+    .filter((url): url is string => Boolean(url));
+  const primaryImage = resolveImageUrl(incident.imageUrl) || normalizedImageUrls[0];
+
+  return {
+    ...incident,
+    imageUrl: primaryImage,
+    imageUrls: normalizedImageUrls.length ? normalizedImageUrls : undefined,
+  };
+};
+
+const normalizeIncidentListMedia = (incidents: Incident[]): Incident[] =>
+  incidents.map((incident) => normalizeIncidentMedia(incident));
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -79,33 +121,61 @@ export const incidentService = {
   
 
   async getIncidents(): Promise<ApiResponse<Incident[]>> {
-    return apiClient.get<Incident[]>(API_ENDPOINTS.INCIDENTS.LIST);
+    const response = await apiClient.get<Incident[]>(API_ENDPOINTS.INCIDENTS.LIST);
+    if (!response.success || !response.data) {
+      return response;
+    }
+    return { ...response, data: normalizeIncidentListMedia(response.data) };
   },
 
   
 
   async getIncidentById(id: string): Promise<ApiResponse<Incident>> {
-    return apiClient.get<Incident>(API_ENDPOINTS.INCIDENTS.GET_BY_ID(id));
+    const response = await apiClient.get<Incident>(API_ENDPOINTS.INCIDENTS.GET_BY_ID(id));
+    if (!response.success || !response.data) {
+      return response;
+    }
+    return { ...response, data: normalizeIncidentMedia(response.data) };
   },
 
   
 
   async createIncident(data: CreateIncidentData): Promise<ApiResponse<Incident>> {
     if (data.images && data.images.length > 0) {
-      const base64Images = await Promise.all(data.images.map(fileToBase64));
+      let base64Images: string[] = [];
+      try {
+        base64Images = await Promise.all(data.images.map(fileToBase64));
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to process incident images',
+        };
+      }
       const { images, ...incidentData } = data;
-      return apiClient.post<Incident>(API_ENDPOINTS.INCIDENTS.CREATE, {
+      const response = await apiClient.post<Incident>(API_ENDPOINTS.INCIDENTS.CREATE, {
         ...incidentData,
         images: base64Images
       });
+      if (!response.success || !response.data) {
+        return response;
+      }
+      return { ...response, data: normalizeIncidentMedia(response.data) };
     }
-    return apiClient.post<Incident>(API_ENDPOINTS.INCIDENTS.CREATE, data);
+    const response = await apiClient.post<Incident>(API_ENDPOINTS.INCIDENTS.CREATE, data);
+    if (!response.success || !response.data) {
+      return response;
+    }
+    return { ...response, data: normalizeIncidentMedia(response.data) };
   },
 
   
 
   async updateIncident(id: string, data: UpdateIncidentData): Promise<ApiResponse<Incident>> {
-    return apiClient.put<Incident>(API_ENDPOINTS.INCIDENTS.UPDATE(id), data);
+    const response = await apiClient.put<Incident>(API_ENDPOINTS.INCIDENTS.UPDATE(id), data);
+    if (!response.success || !response.data) {
+      return response;
+    }
+    return { ...response, data: normalizeIncidentMedia(response.data) };
   },
 
   

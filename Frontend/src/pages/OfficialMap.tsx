@@ -17,6 +17,7 @@ const OfficialMap = () => {
   const markers = useMemo(() => {
     const items: {
       id: string;
+      entityId?: string;
       position: { lat: number; lng: number };
       title: string;
       description?: string;
@@ -30,6 +31,7 @@ const OfficialMap = () => {
         if (typeof incident.latitude === 'number' && typeof incident.longitude === 'number') {
           items.push({
             id: `incident-${incident.id}`,
+            entityId: incident.id,
             position: { lat: incident.latitude, lng: incident.longitude },
             title: incident.title || 'Incident',
             description: incident.description,
@@ -46,6 +48,7 @@ const OfficialMap = () => {
         if (typeof ticket.latitude === 'number' && typeof ticket.longitude === 'number') {
           items.push({
             id: `ticket-${ticket.id}`,
+            entityId: ticket.incidentId || ticket.id,
             position: { lat: ticket.latitude, lng: ticket.longitude },
             title: ticket.title || 'Ticket',
             description: ticket.description,

@@ -11,6 +11,7 @@ tickets = db["tickets"]
 messages = db["messages"]
 password_resets = db["password_resets"]
 otp_challenges = db["otp_challenges"]
+incident_logs = db["incident_logs"]
 issues_collection = incidents
 
 atexit.register(client.close)
@@ -30,6 +31,8 @@ def init_db():
     
     try:
         users.create_index("userType")
+        users.create_index("officialRole")
+        users.create_index([("userType", 1), ("officialRole", 1)])
     except OperationFailure:
         pass
     
@@ -70,5 +73,12 @@ def init_db():
     try:
         otp_challenges.create_index("expiresAt", expireAfterSeconds=0)
         otp_challenges.create_index([("userId", 1), ("purpose", 1), ("used", 1)])
+    except OperationFailure:
+        pass
+
+    try:
+        incident_logs.create_index("ticketId")
+        incident_logs.create_index("incidentId")
+        incident_logs.create_index("createdAt")
     except OperationFailure:
         pass

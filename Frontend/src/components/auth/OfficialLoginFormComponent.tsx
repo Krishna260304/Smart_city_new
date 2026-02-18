@@ -10,8 +10,18 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { authService, isAuthResponse, isOtpChallenge } from '@/services/auth';
 
+const OFFICIAL_LOGIN_ROLES = [
+  { value: 'department', label: 'Department Login' },
+  { value: 'supervisor', label: 'Supervisor Login' },
+  { value: 'field_inspector', label: 'Field Inspector Login' },
+  { value: 'worker', label: 'Worker Login' },
+] as const;
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_PATTERN = /^[6-9]\d{9}$/;
+
 interface OfficialLoginData {
-  email: string;
+  identifier: string;
   password: string;
   captcha: string;
 }
@@ -20,6 +30,7 @@ export const OfficialLoginFormComponent = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [showPassword, setShowPassword] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<(typeof OFFICIAL_LOGIN_ROLES)[number]['value']>('department');
   const [captchaValue, setCaptchaValue] = useState('');
   const [isCaptchaValid, setIsCaptchaValid] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,10 +64,13 @@ export const OfficialLoginFormComponent = () => {
 
     setIsSubmitting(true);
     try {
+      const identifier = data.identifier.trim();
+      const allowPhoneLogin = selectedRole === 'worker' && PHONE_PATTERN.test(identifier);
       const response = await authService.login({
-        email: data.email,
+        ...(allowPhoneLogin ? { phone: identifier } : { email: identifier }),
         password: data.password,
         expectedUserType: 'official',
+        expectedOfficialRole: selectedRole,
       });
       const result = response.data;
       if (response.success && isOtpChallenge(result) && result.requiresOtp) {
@@ -142,7 +156,7 @@ export const OfficialLoginFormComponent = () => {
       <div className="bg-card rounded-2xl shadow-card p-8 border border-border">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-heading font-bold text-foreground mb-2">Official Login</h1>
-          <p className="text-muted-foreground">Sign in as municipal or society admin</p>
+          <p className="text-muted-foreground">Sign in using your official role</p>
         </div>
 
         {otpChallengeId ? (
@@ -202,25 +216,50 @@ export const OfficialLoginFormComponent = () => {
         ) : (
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="email">Official Email</Label>
+            <Label>Official Role</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {OFFICIAL_LOGIN_ROLES.map((role) => (
+                <button
+                  key={role.value}
+                  type="button"
+                  className={cn(
+                    "h-10 rounded-md border text-sm font-medium transition-colors",
+                    selectedRole === role.value
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background border-input hover:bg-muted"
+                  )}
+                  onClick={() => setSelectedRole(role.value)}
+                >
+                  {role.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="identifier">
+              {selectedRole === 'worker' ? 'Official Email or Phone' : 'Official Email'}
+            </Label>
             <Input
-              id="email"
-              type="email"
-              placeholder="official@safelive.in"
-              autoComplete="email"
-              {...form.register('email', {
-                required: 'Email is required',
-                pattern: {
-                  value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                  message: 'Invalid email address'
-                }
+              id="identifier"
+              type={selectedRole === 'worker' ? 'text' : 'email'}
+              placeholder={selectedRole === 'worker' ? 'official@safelive.in or 9876543210' : 'official@safelive.in'}
+              autoComplete={selectedRole === 'worker' ? 'username' : 'email'}
+              {...form.register('identifier', {
+                required: selectedRole === 'worker' ? 'Email or phone is required' : 'Email is required',
+                validate: (value) => {
+                  const trimmed = value.trim();
+                  if (selectedRole === 'worker') {
+                    return EMAIL_PATTERN.test(trimmed) || PHONE_PATTERN.test(trimmed) || 'Enter a valid email or 10-digit phone number';
+                  }
+                  return EMAIL_PATTERN.test(trimmed) || 'Invalid email address';
+                },
               })}
               className={cn(
-                form.formState.errors.email && "border-destructive focus-visible:ring-destructive"
+                form.formState.errors.identifier && "border-destructive focus-visible:ring-destructive"
               )}
             />
-            {form.formState.errors.email && (
-              <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
+            {form.formState.errors.identifier && (
+              <p className="text-sm text-destructive">{form.formState.errors.identifier.message}</p>
             )}
           </div>
 

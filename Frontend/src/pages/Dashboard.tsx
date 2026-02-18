@@ -283,6 +283,7 @@ const Dashboard = () => {
                           )}
                         </div>
                         <h3 className="font-medium text-foreground truncate">{incident.title}</h3>
+                        <div className="text-xs text-muted-foreground mt-1">Incident ID: {incident.id}</div>
                         <div className="text-sm text-muted-foreground mt-1 line-clamp-2">{incident.description}</div>
                         <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
                           <span className="inline-flex items-center gap-1">
@@ -315,6 +316,10 @@ const Dashboard = () => {
               {selected && (
                 <div className="space-y-4">
                   <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">Incident ID</div>
+                    <div className="text-sm text-foreground mt-1 font-mono">{selected.id}</div>
+                  </div>
+                  <div>
                     <div className="text-xs text-muted-foreground uppercase tracking-wide">Title</div>
                     <div className="font-medium text-foreground mt-1">{selected.title}</div>
                   </div>
@@ -337,7 +342,9 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground uppercase tracking-wide">Severity</div>
-                      <div className="text-sm text-foreground mt-1 font-medium capitalize">{selected.severity || '-'}</div>
+                      <div className="text-sm text-foreground mt-1 font-medium capitalize">
+                        {selected.severity || selected.priority || '-'}
+                      </div>
                     </div>
                   </div>
                   <div className="border-t border-border pt-4">

@@ -8,12 +8,15 @@ class RegisterModel(BaseModel):
     userType: str
     address: str | None = None
     pincode: str | None = None
+    officialRole: str | None = None
+    workerSpecialization: str | None = None
 
 class LoginModel(BaseModel):
     email: str | None = None
     phone: str | None = None
     password: str
     expectedUserType: str | None = None
+    expectedOfficialRole: str | None = None
 
 class IncidentCreate(BaseModel):
     title: str
@@ -49,11 +52,17 @@ class TicketUpdateStatus(BaseModel):
     notes: str | None = None
 
 class TicketAssign(BaseModel):
+    workerId: str | None = None
+    workerIds: list[str] | None = None
     assignedTo: str | None = None
     assigneeName: str | None = None
     assigneePhone: str | None = None
     assigneePhoto: str | None = None
     notes: str | None = None
+
+
+class TicketProgressUpdate(BaseModel):
+    updateText: str
 
 class MessageCreate(BaseModel):
     message: str
