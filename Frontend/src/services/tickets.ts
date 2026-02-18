@@ -3,7 +3,6 @@ import { API_ENDPOINTS } from '@/config/api';
 
 export interface Ticket {
   id: string;
-  incidentId?: string;
   title: string;
   description?: string;
   category: string;
@@ -14,34 +13,21 @@ export interface Ticket {
   longitude?: number;
   reportedBy: string;
   assignedTo?: string;
-  workerId?: string;
-  workerIds?: string[];
-  workerSpecialization?: string;
-  workerSpecializations?: string[];
   assigneeName?: string;
-  assigneeNames?: string[];
   assigneePhone?: string;
-  assigneePhones?: string[];
   assigneePhotoUrl?: string;
-  assignees?: Array<{
-    workerId?: string;
+  assigneeEmail?: string;
+  assigneeUserId?: string;
+  reopenedBy?: {
+    id?: string;
     name?: string;
-    phone?: string;
-    specialization?: string;
-    photoUrl?: string | null;
-  }>;
-  assignedBySupervisorId?: string;
-  verifiedBySupervisorId?: string;
-  verifiedAt?: string;
-  reopenCount?: number;
-  progressPercent?: number;
-  progressSource?: string;
-  progressConfidence?: number;
-  progressSummary?: string;
-  progressUpdatedAt?: string;
-  lastInspectorUpdateAt?: string;
-  fieldInspectorId?: string;
-  fieldInspectorName?: string;
+    timestamp?: string;
+  };
+  reopenWarning?: {
+    message: string;
+    issuedAt: string;
+    supervisorName?: string;
+  };
   createdAt: string;
   updatedAt?: string;
 }
@@ -61,29 +47,11 @@ export interface UpdateStatusData {
 }
 
 export interface AssignTicketData {
-  workerId?: string;
-  workerIds?: string[];
   assignedTo?: string;
   assigneeName?: string;
   assigneePhone?: string;
   assigneePhoto?: string;
   notes?: string;
-}
-
-export interface ProgressUpdateData {
-  updateText: string;
-}
-
-export interface TicketLogbookEntry {
-  id: string;
-  ticketId?: string;
-  incidentId?: string;
-  action: string;
-  actorUserId?: string;
-  actorName?: string;
-  actorOfficialRole?: string;
-  details?: Record<string, unknown>;
-  createdAt: string;
 }
 
 
@@ -121,14 +89,6 @@ export const ticketService = {
 
   async assignTicket(id: string, data: AssignTicketData): Promise<ApiResponse<Ticket>> {
     return apiClient.post<Ticket>(API_ENDPOINTS.TICKETS.ASSIGN(id), data);
-  },
-
-  async updateProgress(id: string, data: ProgressUpdateData): Promise<ApiResponse<Ticket>> {
-    return apiClient.post<Ticket>(API_ENDPOINTS.TICKETS.PROGRESS_UPDATE(id), data);
-  },
-
-  async getLogbook(id: string): Promise<ApiResponse<TicketLogbookEntry[]>> {
-    return apiClient.get<TicketLogbookEntry[]>(API_ENDPOINTS.TICKETS.LOGBOOK(id));
   },
 
   

@@ -1,14 +1,11 @@
 import { apiClient, ApiResponse } from './api';
 import { API_ENDPOINTS } from '@/config/api';
 
-export type OfficialRole = 'department' | 'supervisor' | 'field_inspector' | 'worker';
-
 export interface LoginData {
   email?: string;
   phone?: string;
   password: string;
-  expectedUserType?: 'citizen' | 'official';
-  expectedOfficialRole?: OfficialRole;
+  expectedUserType?: 'citizen' | 'official' | 'head_supervisor';
 }
 
 export interface RegisterData {
@@ -16,11 +13,9 @@ export interface RegisterData {
   email?: string;
   phone?: string;
   password: string;
-  userType: 'citizen' | 'official';
+  userType: 'citizen' | 'official' | 'head_supervisor';
   address?: string;
   pincode?: string;
-  officialRole?: OfficialRole;
-  workerSpecialization?: string;
 }
 
 export interface AuthResponse {
@@ -28,11 +23,10 @@ export interface AuthResponse {
   user: {
     id: string;
     name: string;
+    fullName?: string;
     email?: string;
     phone?: string;
-    userType: 'citizen' | 'official';
-    officialRole?: OfficialRole;
-    workerSpecialization?: string;
+    userType: 'citizen' | 'official' | 'head_supervisor';
     address?: string;
     pincode?: string;
     department?: string;

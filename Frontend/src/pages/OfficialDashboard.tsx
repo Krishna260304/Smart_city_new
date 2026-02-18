@@ -1,962 +1,521 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  ChevronDown,
-  CheckCircle2,
-  ClipboardList,
-  Clock,
-  Filter,
-  RotateCcw,
-  Users,
-} from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { CheckCircle2, ClipboardList, Clock, Filter, AlertCircle, Users, RotateCcw } from 'lucide-react';
 import { OfficialDashboardLayout } from '@/components/layout/OfficialDashboardLayout';
 import { SettingsModal } from '@/components/SettingsModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
-import { useAnalyticsDashboard, useTickets } from '@/hooks/use-data';
-import { authService, OfficialRole } from '@/services/auth';
-import { ticketService, Ticket, TicketLogbookEntry } from '@/services/tickets';
-import { usersService, WorkerOption } from '@/services/users';
+import { useAnalyticsDashboard, useTickets, useTrends } from '@/hooks/use-data';
+import { ticketService, Ticket } from '@/services/tickets';
 import { useToast } from '@/hooks/use-toast';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, Legend } from 'recharts';
+import { cn } from '@/lib/utils';
+import { useLocation } from 'react-router-dom';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { authService } from '@/services/auth';
 
-const STATUS_BADGE: Record<string, string> = {
+const statusBadge: Record<string, string> = {
   open: 'badge-info',
   in_progress: 'badge-warning',
   resolved: 'badge-success',
-  verified: 'badge-warning',
+  verified: 'badge-success'
 };
 
-const ROLE_LABEL: Record<OfficialRole, string> = {
-  department: 'Department',
-  supervisor: 'Supervisor',
-  field_inspector: 'Field Inspector',
-  worker: 'Worker',
-};
-
-const normalizeStatus = (value?: string): string => {
-  const status = (value || '').trim().toLowerCase();
-  if (status === 'verified') {
-    return 'in_progress';
-  }
-  return status;
-};
-
-const formatStatus = (value?: string): string => {
-  const normalized = normalizeStatus(value);
-  if (!normalized) {
-    return 'UNKNOWN';
-  }
-  return normalized.replace('_', ' ').toUpperCase();
-};
-
-const toNumber = (value: unknown): number => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const formatDateTime = (value?: string): string => {
-  if (!value) {
-    return 'N/A';
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return 'N/A';
-  }
-  return parsed.toLocaleString();
-};
-
-const toTitleCase = (value: string): string =>
-  value
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-
-const toReadableText = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return '';
-  }
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => toReadableText(item))
-      .filter(Boolean)
-      .join(', ');
-  }
-  if (typeof value === 'boolean') {
-    return value ? 'Yes' : 'No';
-  }
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? String(value) : '';
-  }
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-  if (typeof value === 'object') {
-    const pairs = Object.entries(value as Record<string, unknown>)
-      .map(([key, val]) => {
-        const text = toReadableText(val);
-        if (!text) {
-          return '';
-        }
-        return `${toTitleCase(key)}: ${text}`;
-      })
-      .filter(Boolean);
-    return pairs.join(', ');
-  }
-  return String(value);
-};
-
-const statusLabel = (value: unknown): string => {
-  const raw = String(value || '').trim();
-  if (!raw) {
-    return '';
-  }
-  return toTitleCase(raw);
-};
-
-const formatLogbookDetails = (row: TicketLogbookEntry): string[] => {
-  const action = String(row.action || '').trim().toLowerCase();
-  const details = (row.details || {}) as Record<string, unknown>;
-  const lines: string[] = [];
-
-  if (action.startsWith('status_')) {
-    const from = statusLabel(details.previousStatus);
-    const to = statusLabel(details.newStatus || action.replace('status_', ''));
-    if (from && to) {
-      lines.push(`Status changed from ${from} to ${to}.`);
-    } else if (to) {
-      lines.push(`Status changed to ${to}.`);
-    }
-    const note = toReadableText(details.notes);
-    if (note) {
-      lines.push(`Note: ${note}`);
-    }
-    return lines;
-  }
-
-  if (action === 'assign_worker') {
-    const workers = toReadableText(details.workerNames || details.workerName);
-    if (workers) {
-      lines.push(`Assigned workers: ${workers}`);
-    }
-    const specs = toReadableText(details.workerSpecializations || details.workerSpecialization);
-    if (specs) {
-      lines.push(`Specialization: ${specs}`);
-    }
-    const note = toReadableText(details.notes);
-    if (note) {
-      lines.push(`Note: ${note}`);
-    }
-    return lines;
-  }
-
-  if (action === 'field_progress_update') {
-    const progress = toReadableText(details.progressPercent);
-    const source = toReadableText(details.source);
-    const confidence = toReadableText(details.confidence);
-    const summary = toReadableText(details.summary);
-
-    if (progress) {
-      lines.push(`Progress updated to ${progress}%.`);
-    }
-    if (source || confidence) {
-      lines.push(
-        `Model source: ${source || 'N/A'}${confidence ? ` (confidence ${confidence})` : ''}`,
-      );
-    }
-    if (summary) {
-      lines.push(`Update: ${summary}`);
-    }
-    return lines;
-  }
-
-  Object.entries(details).forEach(([key, value]) => {
-    const text = toReadableText(value);
-    if (!text) {
-      return;
-    }
-    lines.push(`${toTitleCase(key)}: ${text}`);
-  });
-  return lines;
-};
-
-const toIstDateKey = (value?: string): string => {
-  const target = value ? new Date(value) : new Date();
-  if (Number.isNaN(target.getTime())) {
-    return '';
-  }
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(target);
-};
-
-const normalizeLabel = (value: unknown): string =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-
-const normalizePhone = (value: unknown): string => {
-  const digits = String(value || '').replace(/\D/g, '');
-  if (!digits) {
-    return '';
-  }
-  return digits.length > 10 ? digits.slice(-10) : digits;
-};
-
-const uniqueNonEmpty = (values: Array<string | null | undefined>): string[] => {
-  const output: string[] = [];
-  const seen = new Set<string>();
-  values.forEach((value) => {
-    const current = String(value || '').trim();
-    if (!current || seen.has(current)) {
-      return;
-    }
-    seen.add(current);
-    output.push(current);
-  });
-  return output;
-};
-
-const ticketAssignees = (ticket: Ticket) => {
-  if (Array.isArray(ticket.assignees) && ticket.assignees.length > 0) {
-    return ticket.assignees;
-  }
-  const legacyWorkerId = String(ticket.workerId || '').trim();
-  if (!legacyWorkerId) {
-    return [];
-  }
-  return [
-    {
-      workerId: legacyWorkerId,
-      name: ticket.assigneeName || ticket.assignedTo || 'Worker',
-      phone: ticket.assigneePhone,
-      specialization: ticket.workerSpecialization,
-      photoUrl: ticket.assigneePhotoUrl,
-    },
-  ];
-};
-
-const ticketWorkerIds = (ticket: Ticket): string[] =>
-  uniqueNonEmpty([
-    ticket.workerId,
-    ...(ticket.workerIds || []),
-    ...ticketAssignees(ticket).map((item) => item.workerId),
-  ]);
-
-const ticketAssigneeNames = (ticket: Ticket): string[] =>
-  uniqueNonEmpty([
-    ticket.assigneeName,
-    ticket.assignedTo,
-    ...(ticket.assigneeNames || []),
-    ...ticketAssignees(ticket).map((item) => item.name),
-  ]);
-
-const ticketAssigneePhones = (ticket: Ticket): string[] =>
-  uniqueNonEmpty([
-    ticket.assigneePhone,
-    ...(ticket.assigneePhones || []),
-    ...ticketAssignees(ticket).map((item) => item.phone),
-  ]).map((phone) => normalizePhone(phone));
-
-const ticketWorkerSpecializations = (ticket: Ticket): string[] =>
-  uniqueNonEmpty([
-    ticket.workerSpecialization,
-    ...(ticket.workerSpecializations || []),
-    ...ticketAssignees(ticket).map((item) => item.specialization),
-  ]);
-
-const byRoleTickets = (role: OfficialRole, allTickets: Ticket[], user: Record<string, unknown> | null): Ticket[] => {
-  if (role === 'department' || role === 'supervisor') {
-    return allTickets;
-  }
-
-  if (role === 'field_inspector') {
-    return allTickets.filter((ticket) => normalizeStatus(ticket.status) !== 'resolved');
-  }
-
-  const userIds = new Set(
-    [user?.id, user?._id]
-      .map((value) => String(value || '').trim())
-      .filter(Boolean),
-  );
-  const userPhone = normalizePhone(user?.phone);
-  const userLabels = new Set(
-    [user?.name, user?.email, user?.phone].map((value) => normalizeLabel(value)).filter(Boolean),
-  );
-  if (userPhone) {
-    userLabels.add(userPhone);
-  }
-
-  return allTickets.filter((ticket) => {
-    const ids = ticketWorkerIds(ticket);
-    if (ids.some((ticketWorkerId) => userIds.has(ticketWorkerId))) {
-      return true;
-    }
-
-    const phones = ticketAssigneePhones(ticket);
-    if (userPhone && phones.includes(userPhone)) {
-      return true;
-    }
-
-    const assignees = ticketAssigneeNames(ticket)
-      .map((value) => normalizeLabel(value))
-      .filter(Boolean);
-    return assignees.some((assignee) => userLabels.has(assignee));
-  });
-};
-
-type OfficialViewMode = 'overview' | 'tickets';
-
-interface OfficialDashboardProps {
-  mode?: OfficialViewMode;
+interface AssignmentDraft {
+  name: string;
+  phone: string;
+  photoBase64: string;
+  photoName: string;
 }
 
-const OfficialDashboard = ({ mode = 'tickets' }: OfficialDashboardProps) => {
+const OfficialDashboard = () => {
+  const { pathname } = useLocation();
+  const user = authService.getCurrentUser();
+  const isHeadSupervisor = user?.userType === 'head_supervisor';
+  const normalizedPath = pathname.startsWith('/official/supervisor')
+    ? pathname.replace('/official/supervisor', '/official')
+    : pathname;
   const { toast } = useToast();
   const [showSettings, setShowSettings] = useState(false);
+  const [incidentDialogOpen, setIncidentDialogOpen] = useState(false);
+  const [incidentImageDialogOpen, setIncidentImageDialogOpen] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [query, setQuery] = useState('');
-  const [workers, setWorkers] = useState<WorkerOption[]>([]);
-  const [workersLoading, setWorkersLoading] = useState(false);
-  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string[]>>({});
-  const [progressDrafts, setProgressDrafts] = useState<Record<string, string>>({});
+  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, AssignmentDraft>>({});
+  const [assigneeEditorOpen, setAssigneeEditorOpen] = useState<Record<string, boolean>>({});
+  const [statusDrafts, setStatusDrafts] = useState<Record<string, string>>({});
   const [submittingAssignId, setSubmittingAssignId] = useState<string | null>(null);
   const [submittingStatusId, setSubmittingStatusId] = useState<string | null>(null);
-  const [submittingProgressId, setSubmittingProgressId] = useState<string | null>(null);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
-  const [logbookRows, setLogbookRows] = useState<TicketLogbookEntry[]>([]);
-  const [logbookOpen, setLogbookOpen] = useState(false);
-  const [logbookLoading, setLogbookLoading] = useState(false);
 
-  const currentUser = authService.getCurrentUser() as Record<string, unknown> | null;
-  const officialRole = (currentUser?.officialRole || '') as OfficialRole;
-  const isDepartment = officialRole === 'department';
-  const isSupervisor = officialRole === 'supervisor';
-  const isFieldInspector = officialRole === 'field_inspector';
-  const isWorker = officialRole === 'worker';
-  const isOverviewMode = mode === 'overview';
-  const canAssignAndVerify = isSupervisor || isDepartment;
-  const canSubmitProgress = isFieldInspector;
+  const { tickets, loading: ticketsLoading, error: ticketsError, refetch: refetchTickets } = useTickets();
+  const { data: analytics, loading: analyticsLoading, error: analyticsError, refetch: refetchAnalytics } = useAnalyticsDashboard();
+  const { data: trends, loading: trendsLoading } = useTrends(14);
 
-  const {
-    tickets,
-    loading: ticketsLoading,
-    error: ticketsError,
-    refetch: refetchTickets,
-  } = useTickets();
-  const { data: analytics, refetch: refetchAnalytics } = useAnalyticsDashboard();
-
-  useEffect(() => {
-    const loadWorkers = async () => {
-      if (!canAssignAndVerify || isOverviewMode) {
-        setWorkers([]);
-        return;
-      }
-
-      setWorkersLoading(true);
-      const response = await usersService.listWorkers();
-      if (response.success && response.data) {
-        setWorkers(response.data);
-      } else {
-        setWorkers([]);
-      }
-      setWorkersLoading(false);
-    };
-
-    void loadWorkers();
-  }, [canAssignAndVerify, isOverviewMode]);
-
-  const visibleTickets = useMemo(() => {
-    if (!officialRole) {
-      return [];
-    }
-
-    const scoped = byRoleTickets(officialRole, tickets, currentUser);
+  const filteredTickets = useMemo(() => {
     const term = query.trim().toLowerCase();
-    if (!term) {
-      return scoped;
-    }
-
-    return scoped.filter((ticket) =>
-      [
-        ticket.title,
-        ticket.description,
-        ticket.category,
-        ticket.location,
-        ticket.assignedTo,
-        ticket.assigneeName,
-        ticket.workerSpecialization,
-        ...(ticket.assigneeNames || []),
-        ...(ticket.workerSpecializations || []),
-        ...ticketAssignees(ticket)
-          .map((item) => [item.name, item.specialization].filter(Boolean).join(' '))
-          .filter(Boolean),
-      ]
+    if (!term) return tickets;
+    return tickets.filter((t) =>
+      [t.title, t.description, t.category, t.location, t.status, t.assignedTo, t.assigneeName, t.assigneePhone]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
-        .includes(term),
+        .includes(term)
     );
-  }, [currentUser, officialRole, query, tickets]);
+  }, [tickets, query]);
 
-  const stats = useMemo(() => {
-    const openCount = visibleTickets.filter((ticket) => normalizeStatus(ticket.status) === 'open').length;
-    const inProgressCount = visibleTickets.filter(
-      (ticket) => normalizeStatus(ticket.status) === 'in_progress',
-    ).length;
-    const resolvedCount = visibleTickets.filter(
-      (ticket) => normalizeStatus(ticket.status) === 'resolved',
-    ).length;
-
-    return {
-      total: visibleTickets.length,
-      open: openCount,
-      inProgress: inProgressCount,
-      resolved: resolvedCount,
-    };
-  }, [visibleTickets]);
-
-  const inspectorPendingDailyUpdates = useMemo(() => {
-    if (!isFieldInspector) {
-      return 0;
-    }
-
-    const todayIst = toIstDateKey();
-    return visibleTickets.filter((ticket) => {
-      if (normalizeStatus(ticket.status) !== 'in_progress') {
-        return false;
-      }
-
-      const updatedToday = toIstDateKey(ticket.lastInspectorUpdateAt) === todayIst;
-      return !updatedToday;
-    }).length;
-  }, [isFieldInspector, visibleTickets]);
-
-  const refreshEverything = async () => {
-    await Promise.all([refetchTickets(), refetchAnalytics()]);
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        const parts = result.split(',');
+        const base64 = parts.length > 1 ? parts[1] : '';
+        if (!base64) {
+          reject(new Error('Invalid image'));
+          return;
+        }
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error('Unable to read image'));
+      reader.readAsDataURL(file);
+    });
   };
 
-  const listLabel = isWorker ? 'Assigned Work' : isOverviewMode ? 'Tracked Tickets' : 'Visible Tickets';
-  const listSearchPlaceholder = isWorker
-    ? 'Search assigned work by title, category, place'
-    : 'Search by title, category, location, assignee';
-  const listEmptyState = isWorker ? 'No assigned work found.' : 'No tickets found for this role.';
-  const overviewTickets = useMemo(() => visibleTickets.slice(0, 6), [visibleTickets]);
-  const pageTitle = isOverviewMode
-    ? `${ROLE_LABEL[officialRole]} Dashboard`
-    : isWorker
-      ? 'Assigned Work'
-      : `${ROLE_LABEL[officialRole]} Tickets`;
-  const pageDescription = isOverviewMode
-    ? 'High-level metrics and recent activity snapshot.'
-    : isDepartment
-      ? 'Department can assign workers, verify, reopen/resolve tickets, and access read-only logbooks.'
-      : isSupervisor
-        ? 'Supervisor assigns one or more workers from the roster and verifies tickets.'
-        : isFieldInspector
-          ? 'Field inspector must submit daily progress before 6:00 PM IST. AI predicts completion (5%, 10%, ...).'
-          : 'Worker dashboard shows only assigned work and live progress.';
+  const getAssignmentDraft = (ticketId: string, fallbackName = '', fallbackPhone = ''): AssignmentDraft => {
+    return assignmentDrafts[ticketId] || {
+      name: fallbackName,
+      phone: fallbackPhone,
+      photoBase64: '',
+      photoName: '',
+    };
+  };
 
-  const handleAssignWorker = async (ticketId: string, selectedWorkerIds: string[]) => {
-    const workerIds = uniqueNonEmpty(selectedWorkerIds);
-    if (!workerIds.length) {
-      toast({
-        title: 'Workers Required',
-        description: 'Select one or more workers.',
-        variant: 'destructive',
-      });
+  const setAssignmentDraft = (ticketId: string, updates: Partial<AssignmentDraft>, fallbackName = '', fallbackPhone = '') => {
+    setAssignmentDrafts((prev) => {
+      const current = prev[ticketId] || {
+        name: fallbackName,
+        phone: fallbackPhone,
+        photoBase64: '',
+        photoName: '',
+      };
+      return {
+        ...prev,
+        [ticketId]: {
+          ...current,
+          ...updates,
+        },
+      };
+    });
+  };
+
+  const openAssigneeEditor = (ticketId: string, fallbackName = '', fallbackPhone = '') => {
+    setAssignmentDraft(ticketId, {}, fallbackName, fallbackPhone);
+    setAssigneeEditorOpen((prev) => ({ ...prev, [ticketId]: true }));
+  };
+
+  const closeAssigneeEditor = (ticketId: string) => {
+    setAssigneeEditorOpen((prev) => ({ ...prev, [ticketId]: false }));
+  };
+
+  const stats = useMemo(() => {
+    const total = analytics?.tickets.total || tickets.length;
+    const open = analytics?.tickets.open || tickets.filter((t) => t.status === 'open').length;
+    const inProgress = analytics?.tickets.inProgress || tickets.filter((t) => t.status === 'in_progress').length;
+    const resolved = analytics?.tickets.resolved || tickets.filter((t) => t.status === 'resolved').length;
+    return { total, open, inProgress, resolved };
+  }, [analytics, tickets]);
+
+  const currentSection = useMemo(() => {
+    if (normalizedPath.includes('/official/tickets')) return 'tickets';
+    if (normalizedPath.includes('/official/personnel')) return 'personnel';
+    if (normalizedPath.includes('/official/analytics')) return 'analytics';
+    if (normalizedPath.includes('/official/alerts')) return 'alerts';
+    return 'overview';
+  }, [normalizedPath]);
+
+  const handleAssigneePhoto = async (ticketId: string, file: File | null, fallbackName = '', fallbackPhone = '') => {
+    if (!file) return;
+    try {
+      const base64 = await fileToBase64(file);
+      setAssignmentDraft(ticketId, { photoBase64: base64, photoName: file.name }, fallbackName, fallbackPhone);
+    } catch {
+      toast({ title: 'Invalid Photo', description: 'Upload a valid image file', variant: 'destructive' });
+    }
+  };
+
+  const handleAssign = async (ticketId: string, fallbackName = '', fallbackPhone = '', hasExistingPhoto = false) => {
+    const draft = getAssignmentDraft(ticketId, fallbackName, fallbackPhone);
+    const name = draft.name.trim();
+    const phoneDigits = draft.phone.replace(/\D/g, '');
+
+    if (!name) {
+      toast({ title: 'Name Required', description: 'Enter personnel name', variant: 'destructive' });
+      return;
+    }
+    if (phoneDigits.length < 10 || phoneDigits.length > 15) {
+      toast({ title: 'Phone Required', description: 'Enter a valid phone number', variant: 'destructive' });
+      return;
+    }
+    if (!draft.photoBase64 && !hasExistingPhoto) {
+      toast({ title: 'Photo Required', description: 'Upload personnel photo', variant: 'destructive' });
       return;
     }
 
     setSubmittingAssignId(ticketId);
     try {
-      const response = await ticketService.assignTicket(ticketId, { workerIds });
+      const response = await ticketService.assignTicket(ticketId, {
+        assigneeName: name,
+        assigneePhone: phoneDigits,
+        assignedTo: name,
+        assigneePhoto: draft.photoBase64 || undefined,
+      });
       if (response.success) {
-        toast({ title: 'Workers Assigned', description: 'Supervisor assignment saved.' });
-        await refreshEverything();
-      } else {
+        const updated = response.data;
         toast({
-          title: 'Assignment Failed',
-          description: response.error || 'Could not assign worker.',
-          variant: 'destructive',
+          title: fallbackName ? 'Personnel Changed' : 'Ticket Assigned',
+          description: 'Assignment updated successfully',
         });
+        setAssignmentDraft(ticketId, {
+          name: updated?.assigneeName || updated?.assignedTo || name,
+          phone: updated?.assigneePhone || phoneDigits,
+          photoBase64: '',
+          photoName: '',
+        });
+        closeAssigneeEditor(ticketId);
+        await refetchTickets();
+        await refetchAnalytics();
+      } else {
+        toast({ title: 'Assign Failed', description: response.error || 'Unable to assign', variant: 'destructive' });
       }
     } finally {
       setSubmittingAssignId(null);
     }
   };
 
-  const updateWorkerSelectionDraft = (
-    ticketId: string,
-    workerId: string,
-    fallbackWorkerIds: string[],
-    nextChecked: boolean,
-  ) => {
-    setAssignmentDrafts((prev) => {
-      const current = new Set(prev[ticketId] ?? fallbackWorkerIds);
-      if (nextChecked) {
-        current.add(workerId);
-      } else {
-        current.delete(workerId);
-      }
-      return { ...prev, [ticketId]: Array.from(current) };
-    });
-  };
-
-  const handleUpdateStatus = async (ticketId: string, nextStatus: 'open' | 'resolved' | 'verified') => {
+  const handleStatus = async (ticketId: string, nextStatus?: string) => {
+    const targetStatus = nextStatus || statusDrafts[ticketId] || '';
+    if (!targetStatus) {
+      toast({ title: 'Status Required', description: 'Select a status', variant: 'destructive' });
+      return;
+    }
     setSubmittingStatusId(ticketId);
     try {
-      const response = await ticketService.updateStatus(ticketId, { status: nextStatus });
+      const response = await ticketService.updateStatus(ticketId, { status: targetStatus });
       if (response.success) {
-        const statusMessage: Record<'open' | 'resolved' | 'verified', string> = {
-          verified: 'Ticket verified and moved to IN PROGRESS.',
-          open: 'Ticket reopened.',
-          resolved: 'Ticket marked as resolved.',
-        };
+        const finalStatus = response.data?.status || targetStatus;
         toast({
-          title: 'Status Updated',
-          description: statusMessage[nextStatus],
+          title: finalStatus === 'open' ? 'Ticket Reopened' : 'Status Updated',
+          description:
+            targetStatus === 'verified'
+              ? 'Verified ticket moved to IN_PROGRESS'
+              : finalStatus === 'open'
+                ? 'Ticket moved back to OPEN'
+                : 'Ticket status updated',
         });
-        await refreshEverything();
+        setStatusDrafts((prev) => ({ ...prev, [ticketId]: '' }));
+        await refetchTickets();
+        await refetchAnalytics();
       } else {
-        toast({
-          title: 'Status Update Failed',
-          description: response.error || 'Could not update ticket status.',
-          variant: 'destructive',
-        });
+        toast({ title: 'Update Failed', description: response.error || 'Unable to update status', variant: 'destructive' });
       }
     } finally {
       setSubmittingStatusId(null);
     }
   };
 
-  const handleProgressUpdate = async (ticketId: string) => {
-    const updateText = String(progressDrafts[ticketId] || '').trim();
-    if (!updateText) {
-      toast({
-        title: 'Update Required',
-        description: 'Enter progress details for AI estimation.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setSubmittingProgressId(ticketId);
-    try {
-      const response = await ticketService.updateProgress(ticketId, { updateText });
-      if (response.success) {
-        toast({
-          title: 'Progress Submitted',
-          description: `Estimated completion: ${response.data?.progressPercent ?? 0}%.`,
-        });
-        setProgressDrafts((prev) => ({ ...prev, [ticketId]: '' }));
-        await refreshEverything();
-      } else {
-        toast({
-          title: 'Update Failed',
-          description: response.error || 'Could not submit progress update.',
-          variant: 'destructive',
-        });
-      }
-    } finally {
-      setSubmittingProgressId(null);
-    }
-  };
-
-  const handleOpenLogbook = async (ticket: Ticket) => {
-    if (!isDepartment) {
-      return;
-    }
-
+  const openIncidentDetails = (ticket: Ticket) => {
     setSelectedTicket(ticket);
-    setLogbookRows([]);
-    setLogbookOpen(true);
-    setLogbookLoading(true);
-
-    const response = await ticketService.getLogbook(ticket.id);
-    if (response.success && response.data) {
-      setLogbookRows(response.data);
-    } else {
-      setLogbookRows([]);
-    }
-
-    setLogbookLoading(false);
+    setIncidentImageDialogOpen(false);
+    setIncidentDialogOpen(true);
   };
 
-  if (!officialRole || !ROLE_LABEL[officialRole]) {
-    return (
-      <OfficialDashboardLayout>
-        <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
-          This account does not have a valid official role.
-        </div>
-      </OfficialDashboardLayout>
-    );
-  }
+  const formatStatus = (value: string) => value.replace('_', ' ').toUpperCase();
 
   return (
     <>
-      <SettingsModal open={showSettings} onOpenChange={setShowSettings} isOfficial />
+      <SettingsModal open={showSettings} onOpenChange={setShowSettings} isOfficial={true} />
       <OfficialDashboardLayout onSettingsClick={() => setShowSettings(true)}>
         <div className="space-y-6 animate-fade-in">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-heading font-bold text-foreground">{pageTitle}</h1>
-              <p className="text-muted-foreground">{pageDescription}</p>
+              <h1 className="text-2xl font-heading font-bold text-foreground">
+                {isHeadSupervisor ? 'Head Supervisor Command Center' : 'Department Official Console'}
+              </h1>
+              <p className="text-muted-foreground">
+                {isHeadSupervisor
+                  ? 'Coordinate cross-departmental operations, analytics, and staffing in real time.'
+                  : 'Track assigned incidents, update progress, and collaborate with your supervisor team.'}
+              </p>
             </div>
           </div>
 
-          {ticketsError && (
-            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-              {ticketsError}
+          {(ticketsError || analyticsError) && (
+            <div className="p-4 bg-card rounded-xl border border-border text-destructive">
+              {ticketsError || analyticsError}
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="text-sm text-muted-foreground">{listLabel}</div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 bg-card rounded-xl border border-border">
+              <div className="text-sm text-muted-foreground">Total Tickets</div>
               <div className="text-2xl font-heading font-bold text-foreground">{stats.total}</div>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4">
+            <div className="p-4 bg-card rounded-xl border border-border">
               <div className="text-sm text-muted-foreground">Open</div>
               <div className="text-2xl font-heading font-bold text-info">{stats.open}</div>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4">
+            <div className="p-4 bg-card rounded-xl border border-border">
               <div className="text-sm text-muted-foreground">In Progress</div>
               <div className="text-2xl font-heading font-bold text-warning">{stats.inProgress}</div>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="text-sm text-muted-foreground">
-                {isFieldInspector ? 'Pending Daily Updates' : 'Resolved'}
-              </div>
-              <div className="text-2xl font-heading font-bold text-success">
-                {isFieldInspector ? inspectorPendingDailyUpdates : stats.resolved}
-              </div>
+            <div className="p-4 bg-card rounded-xl border border-border">
+              <div className="text-sm text-muted-foreground">Resolved</div>
+              <div className="text-2xl font-heading font-bold text-success">{stats.resolved}</div>
             </div>
           </div>
 
-          {(isDepartment || isSupervisor) && (
-            <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-              AI dashboard totals: {toNumber(analytics?.tickets.total)} total, {toNumber(analytics?.tickets.open)} open,
-              {` `}
-              {toNumber(analytics?.tickets.inProgress)} in progress, {toNumber(analytics?.tickets.resolved)} resolved.
+          {(currentSection === 'overview' || currentSection === 'analytics') && (
+            <div className="grid lg:grid-cols-2 gap-6">
+              <div className="bg-card rounded-xl border border-border p-4">
+                <h2 className="font-heading font-semibold text-foreground mb-3">Issue Category Distribution</h2>
+                {analyticsLoading && <div className="text-sm text-muted-foreground">Loading analytics...</div>}
+                {!analyticsLoading && (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={analytics?.byCategory || []}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="category" />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+              <div className="bg-card rounded-xl border border-border p-4">
+                <h2 className="font-heading font-semibold text-foreground mb-3">14-Day Trend</h2>
+                {trendsLoading && <div className="text-sm text-muted-foreground">Loading trends...</div>}
+                {!trendsLoading && (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={trends}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        <Line type="monotone" dataKey="created" stroke="hsl(var(--warning))" strokeWidth={2} />
+                        <Line type="monotone" dataKey="resolved" stroke="hsl(var(--success))" strokeWidth={2} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {isOverviewMode ? (
-            <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-              <div>
-                <h2 className="text-lg font-semibold text-foreground">Overview Snapshot</h2>
-                <p className="text-sm text-muted-foreground">
-                  High-level view only. Open the Tickets tab for assignment and workflow actions.
-                </p>
-              </div>
-
-              {ticketsLoading && <div className="text-sm text-muted-foreground">Loading tickets...</div>}
-              {!ticketsLoading && overviewTickets.length === 0 && (
-                <div className="text-sm text-muted-foreground">{listEmptyState}</div>
+          {(currentSection === 'overview' || currentSection === 'personnel') && (
+            <div className="bg-card rounded-xl border border-border p-4">
+              <h2 className="font-heading font-semibold text-foreground mb-3">Worker Productivity</h2>
+              {analyticsLoading && <div className="text-sm text-muted-foreground">Loading worker metrics...</div>}
+              {!analyticsLoading && (analytics?.workerProductivity || []).length === 0 && (
+                <div className="text-sm text-muted-foreground">No assigned work yet</div>
               )}
-
               <div className="space-y-2">
-                {overviewTickets.map((ticket) => {
-                  const status = normalizeStatus(ticket.status);
-                  const progressValue = ticket.progressPercent ?? 0;
-                  const assignedWorkerNames = ticketAssigneeNames(ticket);
-
-                  return (
-                    <div key={ticket.id} className="rounded-lg border border-border p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-foreground">{ticket.title}</div>
-                        <span
-                          className={cn(
-                            'rounded-full border px-2 py-0.5 text-xs font-medium',
-                            STATUS_BADGE[status] || 'badge-info',
-                          )}
-                        >
-                          {formatStatus(status)}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Place: {ticket.location || 'N/A'} | Workers:{' '}
-                        {assignedWorkerNames.length > 0 ? assignedWorkerNames.join(', ') : 'Not assigned'} | Completion:{' '}
-                        {progressValue}%
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">Updated: {formatDateTime(ticket.updatedAt)}</div>
+                {(analytics?.workerProductivity || []).map((worker) => (
+                  <div key={worker.worker} className="p-3 rounded-lg border border-border">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium text-foreground">{worker.worker}</div>
+                      <div className="text-sm text-muted-foreground">{worker.resolutionRate}% resolved</div>
                     </div>
-                  );
-                })}
+                    <div className="grid grid-cols-4 gap-2 mt-2 text-xs text-muted-foreground">
+                      <div>Total: {worker.total}</div>
+                      <div>Open: {worker.open}</div>
+                      <div>In Progress: {worker.inProgress}</div>
+                      <div>Resolved: {worker.resolved}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          ) : (
-            <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-              <div className="relative">
-                <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  className="pl-9"
-                  placeholder={listSearchPlaceholder}
-                />
+          )}
+
+          {(currentSection === 'overview' || currentSection === 'tickets' || currentSection === 'alerts') && (
+            <div className="bg-card rounded-xl border border-border p-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <Filter className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search tickets by title, category, assignee, location"
+                    className="pl-9"
+                  />
+                </div>
               </div>
 
               {ticketsLoading && <div className="text-sm text-muted-foreground">Loading tickets...</div>}
-              {!ticketsLoading && visibleTickets.length === 0 && (
-                <div className="text-sm text-muted-foreground">{listEmptyState}</div>
-              )}
+              {!ticketsLoading && filteredTickets.length === 0 && <div className="text-sm text-muted-foreground">No tickets found</div>}
 
               <div className="space-y-3">
-                {visibleTickets.map((ticket) => {
-                const status = normalizeStatus(ticket.status);
-                const existingWorkerIds = ticketWorkerIds(ticket);
-                const selectedWorkerIds = assignmentDrafts[ticket.id] ?? existingWorkerIds;
-                const canVerify = status === 'open' && (isDepartment || selectedWorkerIds.length > 0);
-                const isResolved = status === 'resolved';
-                const supervisorResolveLocked = isSupervisor && Number(ticket.reopenCount || 0) > 0;
-                  const progressValue = ticket.progressPercent ?? 0;
-                  const assignedWorkerNames = ticketAssigneeNames(ticket);
-                  const assignedWorkerSpecializations = ticketWorkerSpecializations(ticket);
+                {filteredTickets.map((ticket) => {
+                  const existingName = ticket.assigneeName || ticket.assignedTo || '';
+                  const existingPhone = ticket.assigneePhone || '';
+                  const assignmentDraft = getAssignmentDraft(ticket.id, existingName, existingPhone);
+                  const isResolved = ticket.status === 'resolved';
+                  const hasAssignee = !!existingName;
+                  const isEditingAssignee = !!assigneeEditorOpen[ticket.id];
 
                   return (
-                    <div key={ticket.id} className="rounded-xl border border-border p-4">
-                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-foreground">{ticket.title}</span>
-                            <span
-                              className={cn(
-                                'rounded-full border px-2 py-0.5 text-xs font-medium',
-                                STATUS_BADGE[status] || 'badge-info',
-                              )}
-                            >
-                              {formatStatus(status)}
-                            </span>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {ticket.category} | {ticket.priority} priority
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Place: {ticket.location || 'N/A'}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Workers: {assignedWorkerNames.length > 0 ? assignedWorkerNames.join(', ') : 'Not assigned'}
-                            {assignedWorkerSpecializations.length > 0
-                              ? ` (${assignedWorkerSpecializations.join(', ')})`
-                              : ''}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Completion: <span className="font-medium text-foreground">{progressValue}%</span>
+                    <div key={ticket.id} className="p-4 rounded-xl border border-border space-y-3">
+                      {ticket.reopenWarning && !isHeadSupervisor && (
+                        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
+                          <AlertCircle className="h-4 w-4 shrink-0" />
+                          <div>
+                            <p className="font-medium text-warning">
+                              {ticket.reopenWarning.supervisorName || 'Head Supervisor'} reopened this case
+                            </p>
+                            <p>{ticket.reopenWarning.message}</p>
                           </div>
                         </div>
-
-                        <div className="text-xs text-muted-foreground">Updated: {formatDateTime(ticket.updatedAt)}</div>
+                      )}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-foreground">{ticket.title}</span>
+                            <span className={cn("px-2 py-0.5 text-xs font-medium rounded-full border", statusBadge[ticket.status] || 'badge-info')}>
+                              {ticket.status}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">{ticket.category} | {ticket.priority} priority</div>
+                          <div className="text-xs text-muted-foreground">{ticket.location}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Assigned: {existingName || 'Unassigned'}{existingPhone ? ` (${existingPhone})` : ''}
+                          </div>
+                        </div>
+                        <div className="shrink-0">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 px-3 text-xs"
+                            onClick={() => openIncidentDetails(ticket)}
+                          >
+                            Show Incident
+                          </Button>
+                        </div>
                       </div>
 
-                      {isDepartment && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {!isResolved ? (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={submittingStatusId === ticket.id}
-                                >
-                                  <CheckCircle2 className="mr-1 h-4 w-4" />
-                                  Update Status
-                                  <ChevronDown className="ml-2 h-4 w-4 opacity-70" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="start">
-                                <DropdownMenuItem
-                                  onClick={() => void handleUpdateStatus(ticket.id, 'verified')}
-                                  disabled={submittingStatusId === ticket.id || !canVerify}
-                                >
-                                  Verified
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => void handleUpdateStatus(ticket.id, 'resolved')}
-                                  disabled={submittingStatusId === ticket.id}
-                                >
-                                  Resolved
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          ) : (
+                      {isResolved ? (
+                        <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-border p-2">
+                          <span className="text-sm text-muted-foreground">
+                            {isHeadSupervisor
+                              ? 'Resolved ticket. Reopen to reassign or escalate.'
+                              : 'Resolved ticket. Awaiting supervisor review for any reopening.'}
+                          </span>
+                          {isHeadSupervisor && (
                             <Button
-                              size="sm"
                               variant="outline"
-                              onClick={() => void handleUpdateStatus(ticket.id, 'open')}
+                              onClick={() => handleStatus(ticket.id, 'open')}
                               disabled={submittingStatusId === ticket.id}
                             >
-                              <RotateCcw className="mr-1 h-4 w-4" />
+                              <RotateCcw className="h-4 w-4 mr-1" />
                               Reopen
                             </Button>
                           )}
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void handleOpenLogbook(ticket)}
-                          >
-                            <ClipboardList className="mr-1 h-4 w-4" />
-                            Read Logbook
-                          </Button>
                         </div>
-                      )}
-
-                      {canAssignAndVerify && !isResolved && (
-                        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-center">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="w-full justify-between"
-                                disabled={workersLoading && workers.length === 0}
-                              >
-                                <span className="truncate">
-                                  {workersLoading
-                                    ? 'Loading workers...'
-                                    : selectedWorkerIds.length > 0
-                                      ? `${selectedWorkerIds.length} worker${selectedWorkerIds.length > 1 ? 's' : ''} selected`
-                                      : 'Select workers'}
-                                </span>
-                                <ChevronDown className="ml-2 h-4 w-4 opacity-70" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start" className="w-[380px] max-h-72 overflow-y-auto">
-                              <DropdownMenuLabel>Assign Workers</DropdownMenuLabel>
-                              <DropdownMenuSeparator />
-                              {!workersLoading && workers.length === 0 && (
-                                <div className="px-2 py-2 text-xs text-muted-foreground">No workers available.</div>
-                              )}
-                              {!workersLoading &&
-                                workers.map((worker) => {
-                                  const checked = selectedWorkerIds.includes(worker.id);
-                                  return (
-                                    <DropdownMenuCheckboxItem
-                                      key={worker.id}
-                                      checked={checked}
-                                      onCheckedChange={(nextValue) =>
-                                        updateWorkerSelectionDraft(
-                                          ticket.id,
-                                          worker.id,
-                                          existingWorkerIds,
-                                          !!nextValue,
-                                        )
-                                      }
-                                      onSelect={(event) => event.preventDefault()}
-                                      disabled={submittingAssignId === ticket.id}
-                                    >
-                                      {worker.name}
-                                      {worker.workerSpecialization ? ` - ${worker.workerSpecialization}` : ''}
-                                    </DropdownMenuCheckboxItem>
-                                  );
-                                })}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void handleAssignWorker(ticket.id, selectedWorkerIds)}
-                            disabled={submittingAssignId === ticket.id || selectedWorkerIds.length === 0}
-                          >
-                            <Users className="mr-1 h-4 w-4" />
-                            Assign Team
-                          </Button>
-
-                          {isSupervisor && (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button size="sm" disabled={submittingStatusId === ticket.id}>
-                                  <CheckCircle2 className="mr-1 h-4 w-4" />
-                                  Update Status
-                                  <ChevronDown className="ml-2 h-4 w-4 opacity-70" />
+                      ) : (
+                        <div className="grid lg:grid-cols-2 gap-3 mt-3">
+                          <div className="space-y-2">
+                            {!isEditingAssignee ? (
+                              <>
+                                <div className="rounded-md border border-border p-2">
+                                  {hasAssignee ? (
+                                    <div className="text-sm text-foreground">
+                                      <span className="font-medium">{existingName}</span>
+                                      {existingPhone ? ` | ${existingPhone}` : ''}
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-muted-foreground">No personnel assigned yet.</div>
+                                  )}
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => openAssigneeEditor(ticket.id, existingName, existingPhone)}
+                                  disabled={submittingAssignId === ticket.id}
+                                >
+                                  <Users className="h-4 w-4 mr-1" />
+                                  {hasAssignee ? 'Change Personnel' : 'Assign Personnel'}
                                 </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() => void handleUpdateStatus(ticket.id, 'verified')}
-                                  disabled={submittingStatusId === ticket.id || !canVerify}
-                                >
-                                  Verified
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => void handleUpdateStatus(ticket.id, 'resolved')}
-                                  disabled={submittingStatusId === ticket.id || supervisorResolveLocked}
-                                >
-                                  Resolved
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          )}
+                              </>
+                            ) : (
+                              <>
+                                <div className="grid sm:grid-cols-3 gap-2">
+                                  <Input
+                                    placeholder="Personnel name"
+                                    value={assignmentDraft.name}
+                                    onChange={(e) => setAssignmentDraft(ticket.id, { name: e.target.value }, existingName, existingPhone)}
+                                  />
+                                  <Input
+                                    placeholder="Phone number"
+                                    value={assignmentDraft.phone}
+                                    inputMode="numeric"
+                                    onChange={(e) => setAssignmentDraft(ticket.id, { phone: e.target.value }, existingName, existingPhone)}
+                                  />
+                                  <Input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => handleAssigneePhoto(ticket.id, e.target.files?.[0] || null, existingName, existingPhone)}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => handleAssign(ticket.id, existingName, existingPhone, !!ticket.assigneePhotoUrl)}
+                                    disabled={submittingAssignId === ticket.id}
+                                  >
+                                    <Users className="h-4 w-4 mr-1" />
+                                    {hasAssignee ? 'Save Personnel' : 'Assign Personnel'}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => closeAssigneeEditor(ticket.id)}
+                                    disabled={submittingAssignId === ticket.id}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  {assignmentDraft.photoName && (
+                                    <span className="text-xs text-muted-foreground truncate">{assignmentDraft.photoName}</span>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
 
-                          {isSupervisor && supervisorResolveLocked && (
-                            <p className="text-xs text-muted-foreground md:col-span-3">
-                              This ticket was reopened. Only department can mark it as resolved now.
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {canSubmitProgress && !isResolved && (
-                        <div className="mt-3 space-y-2">
-                          <Textarea
-                            rows={3}
-                            placeholder="Daily field update before 6:00 PM IST (e.g. trenching completed, fittings installed, testing started)."
-                            value={progressDrafts[ticket.id] || ''}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setProgressDrafts((prev) => ({ ...prev, [ticket.id]: value }));
-                            }}
-                          />
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-xs text-muted-foreground">
-                              Last inspector update: {formatDateTime(ticket.lastInspectorUpdateAt)}
-                            </p>
-                            <Button
-                              size="sm"
-                              onClick={() => void handleProgressUpdate(ticket.id)}
-                              disabled={submittingProgressId === ticket.id}
+                          <div className="flex gap-2">
+                            <select
+                              className="h-10 px-3 rounded-md border border-input bg-background text-sm w-full"
+                              value={statusDrafts[ticket.id] || ''}
+                              disabled={!hasAssignee || submittingStatusId === ticket.id}
+                              onChange={(e) => {
+                                setStatusDrafts((prev) => ({ ...prev, [ticket.id]: e.target.value }));
+                              }}
                             >
-                              <Clock className="mr-1 h-4 w-4" />
-                              Submit Daily Update
+                              <option value="">Set status</option>
+                              <option value="verified">VERIFIED</option>
+                              <option value="resolved">RESOLVED</option>
+                            </select>
+                            <Button
+                              onClick={() => handleStatus(ticket.id)}
+                              disabled={submittingStatusId === ticket.id || !hasAssignee}
+                            >
+                              <ClipboardList className="h-4 w-4 mr-1" />
+                              Update
                             </Button>
                           </div>
-                        </div>
-                      )}
-
-                      {isWorker && (
-                        <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                          <div className="font-medium text-foreground">Assigned Work Details</div>
-                          <div className="mt-1">Supervisor: {ticket.assignedBySupervisorId || 'N/A'}</div>
-                          <div>Verified At: {formatDateTime(ticket.verifiedAt)}</div>
-                          <div>Progress Summary: {ticket.progressSummary || 'No inspector note yet.'}</div>
-                        </div>
-                      )}
-
-                      {isSupervisor && isResolved && (
-                        <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                          Resolved ticket. If reopening is required, department must reopen first.
-                        </div>
-                      )}
-
-                      {isFieldInspector && isResolved && (
-                        <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                          This ticket is resolved. Daily update is no longer required.
+                          {!hasAssignee && (
+                            <p className="text-xs text-muted-foreground">Assign personnel first to update status.</p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -965,51 +524,139 @@ const OfficialDashboard = ({ mode = 'tickets' }: OfficialDashboardProps) => {
               </div>
             </div>
           )}
-
         </div>
       </OfficialDashboardLayout>
-
-      <Dialog open={logbookOpen} onOpenChange={setLogbookOpen}>
-        <DialogContent className="sm:max-w-3xl">
+      <Dialog
+        open={incidentDialogOpen}
+        onOpenChange={(open) => {
+          setIncidentDialogOpen(open);
+          if (!open) {
+            setIncidentImageDialogOpen(false);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Read-Only Department Logbook</DialogTitle>
+            <DialogTitle>Incident Details</DialogTitle>
             <DialogDescription>
-              Immutable timeline for ticket {selectedTicket?.id || ''}. Only department users can access this view.
+              Full report information for review and action.
             </DialogDescription>
           </DialogHeader>
+          {selectedTicket && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border p-3">
+                <div className="text-xs text-muted-foreground mb-2">Incident Image</div>
+                {selectedTicket.assigneePhotoUrl ? (
+                  <button
+                    type="button"
+                    className="w-full text-left"
+                    onClick={() => setIncidentImageDialogOpen(true)}
+                  >
+                    <img
+                      src={selectedTicket.assigneePhotoUrl}
+                      alt={selectedTicket.assigneeName || selectedTicket.assignedTo || 'Incident image'}
+                      className="w-full h-44 rounded-md object-cover border border-border"
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">Click image to view larger</p>
+                  </button>
+                ) : (
+                  <div className="h-28 rounded-md border border-dashed border-border bg-muted/40 flex items-center justify-center text-sm text-muted-foreground">
+                    No image available
+                  </div>
+                )}
+              </div>
 
-          {logbookLoading && <div className="text-sm text-muted-foreground">Loading logbook...</div>}
+              <div className="rounded-lg border border-border p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-lg font-semibold text-foreground">{selectedTicket.title}</h3>
+                  <span className={cn("px-2 py-0.5 text-xs font-medium rounded-full border", statusBadge[selectedTicket.status] || 'badge-info')}>
+                    {formatStatus(selectedTicket.status)}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {selectedTicket.description || 'No description provided.'}
+                </p>
+              </div>
 
-          {!logbookLoading && logbookRows.length === 0 && (
-            <div className="text-sm text-muted-foreground">No logbook entries found.</div>
-          )}
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Incident ID</div>
+                  <div className="text-sm font-medium text-foreground">{selectedTicket.id}</div>
+                </div>
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Category</div>
+                  <div className="text-sm font-medium text-foreground">{selectedTicket.category}</div>
+                </div>
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Priority</div>
+                  <div className="text-sm font-medium text-foreground">{selectedTicket.priority?.toUpperCase() || 'N/A'}</div>
+                </div>
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Reported By</div>
+                  <div className="text-sm font-medium text-foreground">{selectedTicket.reportedBy || 'Unknown'}</div>
+                </div>
+                <div className="rounded-lg border border-border p-3 sm:col-span-2">
+                  <div className="text-xs text-muted-foreground mb-1">Location</div>
+                  <div className="text-sm font-medium text-foreground">{selectedTicket.location || 'N/A'}</div>
+                </div>
+              </div>
 
-          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
-            {logbookRows.map((row) => {
-              const detailLines = formatLogbookDetails(row);
-              return (
-                <div key={row.id} className="rounded-md border border-border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-foreground">
-                      {String(row.action || '').replace(/_/g, ' ').toUpperCase()}
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Assigned Personnel</div>
+                  <div className="text-sm font-medium text-foreground">
+                    {selectedTicket.assigneeName || selectedTicket.assignedTo || 'Unassigned'}
+                  </div>
+                  {selectedTicket.assigneePhone && (
+                    <div className="text-xs text-muted-foreground mt-1">{selectedTicket.assigneePhone}</div>
+                  )}
+                </div>
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Incident Status</div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      {selectedTicket.status === 'resolved' ? (
+                        <CheckCircle2 className="h-5 w-5 text-success" />
+                      ) : selectedTicket.status === 'in_progress' ? (
+                        <Clock className="h-5 w-5 text-warning" />
+                      ) : (
+                        <AlertCircle className="h-5 w-5 text-info" />
+                      )}
+                      <span className="text-foreground font-medium">{formatStatus(selectedTicket.status)}</span>
                     </div>
-                    <div className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</div>
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Actor: {row.actorName || row.actorUserId || 'Unknown'}
-                    {row.actorOfficialRole ? ` (${row.actorOfficialRole})` : ''}
-                  </div>
-                  <div className="mt-2 rounded bg-muted/40 p-2 text-xs text-foreground">
-                    {detailLines.length > 0 ? (
-                      detailLines.map((line, index) => <div key={`${row.id}-${index}`}>{line}</div>)
-                    ) : (
-                      'No additional details'
-                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-xs text-muted-foreground mb-1">Timeline</div>
+                  <div className="text-xs text-muted-foreground">
+                    Created: {selectedTicket.createdAt ? new Date(selectedTicket.createdAt).toLocaleString() : 'N/A'}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Updated: {selectedTicket.updatedAt ? new Date(selectedTicket.updatedAt).toLocaleString() : 'N/A'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={incidentImageDialogOpen} onOpenChange={setIncidentImageDialogOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Incident Image</DialogTitle>
+            <DialogDescription>Expanded view</DialogDescription>
+          </DialogHeader>
+          {selectedTicket?.assigneePhotoUrl ? (
+            <img
+              src={selectedTicket.assigneePhotoUrl}
+              alt={selectedTicket.assigneeName || selectedTicket.assignedTo || 'Incident image'}
+              className="w-full max-h-[70vh] object-contain rounded-md border border-border"
+            />
+          ) : (
+            <div className="h-40 rounded-md border border-dashed border-border bg-muted/40 flex items-center justify-center text-sm text-muted-foreground">
+              No image available
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>
