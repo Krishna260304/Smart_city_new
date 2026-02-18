@@ -89,6 +89,11 @@ class Settings:
     TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "")
 
     DOMAIN = os.getenv("DOMAIN", "https://safelive.in")
+    PRIORITY_AI_ENABLED = _env_bool("PRIORITY_AI_ENABLED", True)
+    PRIORITY_AI_MODEL = os.getenv("PRIORITY_AI_MODEL", "typeform/distilbert-base-uncased-mnli")
+    PRIORITY_AI_MODEL_WEIGHT = _env_float("PRIORITY_AI_MODEL_WEIGHT", 0.35)
+    PRIORITY_AI_OFFLINE_MODE = _env_bool("PRIORITY_AI_OFFLINE_MODE", False)
+    PRIORITY_AI_REQUEST_TIMEOUT_SECONDS = _env_int("PRIORITY_AI_REQUEST_TIMEOUT_SECONDS", 10)
     CORS_ORIGINS = _split_env_list(os.getenv("CORS_ORIGINS")) or [
         "https://safelive.in",
         "http://localhost:5173",
