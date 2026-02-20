@@ -54,11 +54,32 @@ const toRole = (value: string | undefined): DashboardRole => {
   return 'department';
 };
 
+const IST_DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  timeZone: 'Asia/Kolkata',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+};
+
+const parseIsoAsUtc = (value: string): Date | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(trimmed);
+  const normalized = hasTimezone ? trimmed : `${trimmed}Z`;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
 const formatDateTime = (value?: string) => {
   if (!value) return 'N/A';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  const parsed = parseIsoAsUtc(value);
+  if (!parsed) return value;
+  return `${parsed.toLocaleString('en-IN', IST_DATE_TIME_OPTIONS)} IST`;
 };
 
 const formatStatus = (value?: string) => {
@@ -346,9 +367,9 @@ const OfficialDashboard = () => {
               const selectedWorkerCount = hasLocalSelection ? selectedWorkerIds.length : assignedWorkerNames.length;
               const isReopenedCase = Boolean(
                 ticket.reopenedBy?.timestamp ||
-                  ticket.reopenedBy?.id ||
-                  ticket.reopenedBy?.name ||
-                  ticket.reopenWarning
+                ticket.reopenedBy?.id ||
+                ticket.reopenedBy?.name ||
+                ticket.reopenWarning
               );
               const canDepartmentManageReopened =
                 role === 'department' &&

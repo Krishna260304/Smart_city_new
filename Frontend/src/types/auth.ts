@@ -49,7 +49,6 @@ export type IncidentCategory =
   | 'streetlight'
   | 'water_leakage'
   | 'electricity'
-  | 'fire'
   | 'safety'
   | 'road_damage'
   | 'drainage'

@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import logging
 from fastapi import APIRouter, Depends, HTTPException
-
 from app.auth import get_official_user
 from app.database import incidents, tickets, users
 from app.models import TicketAssign, TicketProgressUpdate, TicketUpdateStatus
@@ -10,37 +9,28 @@ from app.services.audit_log import append_incident_log, get_ticket_logbook
 from app.services.email_service import send_ticket_update_email
 from app.services.notification_service import send_sms, send_whatsapp
 from app.services.progress_ai import predict_ticket_progress
+from app.services.ws_manager import manager
 from app.utils import serialize_doc, serialize_list, to_object_id
-
 router = APIRouter(prefix="/api/tickets")
 LOGGER = logging.getLogger(__name__)
-
 ROLE_DEPARTMENT = "department"
 ROLE_SUPERVISOR = "supervisor"
 ROLE_FIELD_INSPECTOR = "field_inspector"
 ROLE_WORKER = "worker"
 TICKET_STATUSES = {"open", "pending", "in_progress", "verified", "resolved"}
-
-
 def _now_iso():
     return datetime.utcnow().isoformat()
-
-
 def _current_official_role(current_user: dict) -> str:
     role = normalize_official_role(current_user.get("officialRole"))
     if not role:
         raise HTTPException(status_code=403, detail="Official role is required")
     return role
-
-
 def _ensure_roles(current_user: dict, *roles: str) -> str:
     role = _current_official_role(current_user)
     allowed = {normalize_official_role(value) for value in roles}
     if role not in allowed:
         raise HTTPException(status_code=403, detail="Insufficient role permissions")
     return role
-
-
 def _merge_queries(base: dict | None, extra: dict | None) -> dict:
     base = base or {}
     extra = extra or {}
@@ -49,8 +39,6 @@ def _merge_queries(base: dict | None, extra: dict | None) -> dict:
     if not extra:
         return dict(base)
     return {"$and": [base, extra]}
-
-
 def _ticket_scope_query(current_user: dict) -> dict:
     role = _current_official_role(current_user)
     user_id = str(current_user.get("id") or "").strip()
@@ -75,8 +63,6 @@ def _ticket_scope_query(current_user: dict) -> dict:
             {"status": {"$in": ["open", "pending", "in_progress", "verified"]}},
         )
     return {}
-
-
 def _get_ticket_doc(ticket_id: str):
     try:
         obj_id = to_object_id(ticket_id)
@@ -86,8 +72,6 @@ def _get_ticket_doc(ticket_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return doc
-
-
 def _can_access_ticket(doc: dict, current_user: dict) -> bool:
     role = _current_official_role(current_user)
     user_id = str(current_user.get("id") or "").strip()
@@ -101,13 +85,10 @@ def _can_access_ticket(doc: dict, current_user: dict) -> bool:
             return True
         return bool(user_id and field_inspector_id == user_id)
     return False
-
-
 def _resolve_ticket_reporter_email(doc: dict) -> str | None:
     direct_email = (doc.get("reporterEmail") or "").strip()
     if direct_email and "@" in direct_email:
         return direct_email
-
     incident_doc = None
     incident_id = (doc.get("incidentId") or "").strip()
     if incident_id:
@@ -118,11 +99,9 @@ def _resolve_ticket_reporter_email(doc: dict) -> str | None:
             )
         except Exception:
             incident_doc = None
-
     incident_email = ((incident_doc or {}).get("reporterEmail") or "").strip()
     if incident_email and "@" in incident_email:
         return incident_email
-
     reporter_id = (doc.get("reporterId") or (incident_doc or {}).get("reporterId") or "").strip()
     if reporter_id:
         user_doc = None
@@ -133,17 +112,13 @@ def _resolve_ticket_reporter_email(doc: dict) -> str | None:
         user_email = ((user_doc or {}).get("email") or "").strip()
         if user_email and "@" in user_email:
             return user_email
-
     reporter_phone = (doc.get("reporterPhone") or (incident_doc or {}).get("reporterPhone") or "").strip()
     if reporter_phone:
         user_doc = users.find_one({"phone": reporter_phone}, {"email": 1})
         user_email = ((user_doc or {}).get("email") or "").strip()
         if user_email and "@" in user_email:
             return user_email
-
     return None
-
-
 def _notify_ticket_update(doc: dict):
     message = f"SafeLive ticket update: {doc.get('title', 'Ticket')} is now {doc.get('status', 'updated')}."
     if doc.get("reporterPhone"):
@@ -171,15 +146,11 @@ def _notify_ticket_update(doc: dict):
             LOGGER.warning("Email notification failed for ticket %s: %s", doc.get("_id"), exc)
     elif status_value == "resolved":
         LOGGER.warning("Resolved email skipped: reporter email unavailable for ticket %s", doc.get("_id"))
-
-
 def _normalize_ticket_status(value: str) -> str:
     status = (value or "").strip().lower()
     if status in {"pending_review", "under_review"}:
         return "pending"
     return status
-
-
 def _is_reopened_case(doc: dict) -> bool:
     reopened_by = doc.get("reopenedBy")
     if isinstance(reopened_by, dict):
@@ -188,13 +159,10 @@ def _is_reopened_case(doc: dict) -> bool:
                 return True
     elif reopened_by:
         return True
-
     reopen_warning = doc.get("reopenWarning")
     if isinstance(reopen_warning, dict) and any(str(value or "").strip() for value in reopen_warning.values()):
         return True
     return False
-
-
 def _incident_selector_from_ticket(doc: dict) -> dict | None:
     incident_id = (doc.get("incidentId") or "").strip()
     if not incident_id:
@@ -203,15 +171,11 @@ def _incident_selector_from_ticket(doc: dict) -> dict | None:
         return {"_id": to_object_id(incident_id)}
     except Exception:
         return {"_id": incident_id}
-
-
 def _sync_incident_from_ticket(doc: dict, updates: dict):
     selector = _incident_selector_from_ticket(doc)
     if not selector or not updates:
         return
     incidents.update_one(selector, {"$set": updates})
-
-
 def _record_ticket_log(action: str, ticket_doc: dict, actor: dict, details: dict | None = None):
     append_incident_log(
         ticket_id=str(ticket_doc.get("_id") or ""),
@@ -222,68 +186,59 @@ def _record_ticket_log(action: str, ticket_doc: dict, actor: dict, details: dict
     )
 
 
+def _emit_ticket_realtime_event(event_type: str, ticket_doc: dict | None, reason: str | None = None) -> None:
+    if not ticket_doc:
+        return
+    payload = {"type": event_type, "data": serialize_doc(ticket_doc)}
+    if reason:
+        payload["reason"] = reason
+    manager.publish(payload)
 def _build_note_payload(note_text: str, current_user: dict):
     return {
         "note": note_text,
         "createdAt": _now_iso(),
         "by": current_user.get("id"),
     }
-
-
 def _extract_worker_ids_from_ticket(doc: dict) -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
-
     def _append(value: str | None):
         worker_id = str(value or "").strip()
         if not worker_id or worker_id in seen:
             return
         seen.add(worker_id)
         ordered.append(worker_id)
-
     _append(doc.get("assigneeUserId"))
     _append(doc.get("workerId"))
-
     worker_ids = doc.get("workerIds")
     if isinstance(worker_ids, list):
         for row in worker_ids:
             _append(row)
-
     assignees = doc.get("assignees")
     if isinstance(assignees, list):
         for row in assignees:
             if isinstance(row, dict):
                 _append(row.get("workerId"))
-
     return ordered
-
-
 def _is_worker_assigned(doc: dict, worker_user_id: str) -> bool:
     candidate = str(worker_user_id or "").strip()
     if not candidate:
         return False
     return candidate in set(_extract_worker_ids_from_ticket(doc))
-
-
 def _normalize_assignment_worker_ids(payload: TicketAssign) -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
-
     def _append(value: str | None):
         worker_id = str(value or "").strip()
         if not worker_id or worker_id in seen:
             return
         seen.add(worker_id)
         ordered.append(worker_id)
-
     _append(payload.workerId)
     if isinstance(payload.workerIds, list):
         for row in payload.workerIds:
             _append(str(row or ""))
-
     return ordered
-
-
 def _find_worker_doc(worker_id: str | None):
     candidate = (worker_id or "").strip()
     if not candidate:
@@ -300,8 +255,6 @@ def _find_worker_doc(worker_id: str | None):
     if normalize_official_role(doc.get("officialRole")) != ROLE_WORKER:
         return None
     return doc
-
-
 def _notify_ticket_reopened(doc: dict, reopened_by: dict):
     department_name = reopened_by.get("name") or reopened_by.get("email") or "Department Officer"
     ticket_title = doc.get("title", "Ticket")
@@ -309,7 +262,6 @@ def _notify_ticket_reopened(doc: dict, reopened_by: dict):
         f"SafeLive notice: Ticket '{ticket_title}' has been reopened by {department_name}. "
         "Supervisor should review and reassign as needed."
     )
-
     assignee_phones: set[str] = set()
     assignee_emails: set[str] = set()
     assignees = doc.get("assignees")
@@ -323,14 +275,12 @@ def _notify_ticket_reopened(doc: dict, reopened_by: dict):
                 assignee_phones.add(phone)
             if email:
                 assignee_emails.add(email)
-
     primary_phone = (doc.get("assigneePhone") or "").strip()
     primary_email = (doc.get("assigneeEmail") or "").strip()
     if primary_phone:
         assignee_phones.add(primary_phone)
     if primary_email:
         assignee_emails.add(primary_email)
-
     for worker_id in _extract_worker_ids_from_ticket(doc):
         try:
             worker_doc = users.find_one({"_id": to_object_id(worker_id)})
@@ -344,7 +294,6 @@ def _notify_ticket_reopened(doc: dict, reopened_by: dict):
             assignee_phones.add(worker_phone)
         if worker_email:
             assignee_emails.add(worker_email)
-
     for phone in sorted(assignee_phones):
         sms_ok, sms_err = send_sms(phone, message)
         if not sms_ok and sms_err:
@@ -352,13 +301,11 @@ def _notify_ticket_reopened(doc: dict, reopened_by: dict):
         wa_ok, wa_err = send_whatsapp(phone, message)
         if not wa_ok and wa_err:
             LOGGER.warning("Ticket %s reopen WhatsApp failed for %s: %s", doc.get("_id"), phone, wa_err)
-
     for email in sorted(assignee_emails):
         try:
             send_ticket_update_email(email, ticket_title, "Reopened by Department")
         except Exception as exc:
             LOGGER.warning("Ticket %s reopen email failed for %s: %s", doc.get("_id"), email, exc)
-
     warning_payload = {
         "message": message,
         "issuedAt": _now_iso(),
@@ -376,8 +323,6 @@ def _notify_ticket_reopened(doc: dict, reopened_by: dict):
         doc["reopenWarning"] = warning_payload
     except Exception as exc:
         LOGGER.warning("Ticket %s warning persistence failed: %s", doc.get("_id"), exc)
-
-
 @router.get("/stats")
 def get_stats(current_user: dict = Depends(get_official_user)):
     scope = _ticket_scope_query(current_user)
@@ -404,8 +349,6 @@ def get_stats(current_user: dict = Depends(get_official_user)):
             "resolutionRate": resolution_rate,
         },
     }
-
-
 @router.get("")
 def get_tickets(
     status: str | None = None,
@@ -422,31 +365,24 @@ def get_tickets(
         query = _merge_queries(query, {"category": category})
     data = list(tickets.find(query).sort("createdAt", -1))
     return {"success": True, "data": serialize_list(data)}
-
-
 @router.get("/{ticket_id}")
 def get_ticket(ticket_id: str, current_user: dict = Depends(get_official_user)):
     doc = _get_ticket_doc(ticket_id)
     if not _can_access_ticket(doc, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
     return {"success": True, "data": serialize_doc(doc)}
-
-
 @router.patch("/{ticket_id}/status")
 def update_status(ticket_id: str, payload: TicketUpdateStatus, current_user: dict = Depends(get_official_user)):
     existing = _get_ticket_doc(ticket_id)
     if not _can_access_ticket(existing, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
-
     role = _current_official_role(current_user)
     normalized_status = _normalize_ticket_status(payload.status)
     if normalized_status not in TICKET_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status")
-
     is_reopened_case = _is_reopened_case(existing)
     was_resolved = (existing.get("status") or "").strip().lower() == "resolved"
     reopening = normalized_status == "open" and was_resolved
-
     if normalized_status == "resolved":
         if role not in {ROLE_DEPARTMENT, ROLE_SUPERVISOR}:
             raise HTTPException(status_code=403, detail="Only department or supervisor can mark tickets resolved")
@@ -466,7 +402,6 @@ def update_status(ticket_id: str, payload: TicketUpdateStatus, current_user: dic
             )
     if normalized_status in {"open", "pending", "in_progress"} and role not in {ROLE_DEPARTMENT, ROLE_SUPERVISOR}:
         raise HTTPException(status_code=403, detail="Only department or supervisor can set this status")
-
     now = _now_iso()
     update = {"status": normalized_status, "updatedAt": now}
     if reopening:
@@ -476,17 +411,14 @@ def update_status(ticket_id: str, payload: TicketUpdateStatus, current_user: dic
             "timestamp": now,
         }
     clear_warning = not reopening and bool(existing.get("reopenWarning"))
-
     op = {"$set": update}
     if payload.notes:
         op["$push"] = {"notes": _build_note_payload(payload.notes, current_user)}
     if clear_warning:
         op.setdefault("$unset", {})["reopenWarning"] = ""
-
     obj_id = to_object_id(ticket_id)
     tickets.update_one({"_id": obj_id}, op)
     doc = tickets.find_one({"_id": obj_id})
-
     if doc:
         incident_status = "in_progress" if doc.get("status") == "verified" else doc.get("status")
         _sync_incident_from_ticket(
@@ -497,7 +429,6 @@ def update_status(ticket_id: str, payload: TicketUpdateStatus, current_user: dic
             },
         )
         _notify_ticket_update(doc)
-
         if reopening:
             _notify_ticket_reopened(doc, current_user)
             _record_ticket_log(
@@ -527,16 +458,13 @@ def update_status(ticket_id: str, payload: TicketUpdateStatus, current_user: dic
                 current_user,
                 details={"fromStatus": existing.get("status"), "toStatus": doc.get("status")},
             )
-
+        _emit_ticket_realtime_event("TICKET_UPDATED", doc, "status_changed")
     return {"success": True, "data": serialize_doc(doc)}
-
-
 @router.post("/{ticket_id}/assign")
 def assign_ticket(ticket_id: str, payload: TicketAssign, current_user: dict = Depends(get_official_user)):
     existing = _get_ticket_doc(ticket_id)
     if not _can_access_ticket(existing, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
-
     role = _current_official_role(current_user)
     if role == ROLE_SUPERVISOR:
         pass
@@ -547,11 +475,9 @@ def assign_ticket(ticket_id: str, payload: TicketAssign, current_user: dict = De
             status_code=403,
             detail="Only supervisor can assign workers. Department can assign on reopened tickets only",
         )
-
     assignment_worker_ids = _normalize_assignment_worker_ids(payload)
     if not assignment_worker_ids:
         raise HTTPException(status_code=400, detail="At least one workerId is required for assignment")
-
     assignees: list[dict] = []
     for worker_id in assignment_worker_ids:
         worker_doc = _find_worker_doc(worker_id)
@@ -573,18 +499,14 @@ def assign_ticket(ticket_id: str, payload: TicketAssign, current_user: dict = De
                 "workerSpecialization": (worker_payload.get("workerSpecialization") or "Other").strip(),
             }
         )
-
     if not assignees:
         raise HTTPException(status_code=400, detail="No valid worker accounts selected")
-
     primary_assignee = assignees[0]
     assigned_to_text = primary_assignee["name"]
     if len(assignees) > 1:
         assigned_to_text = f"{primary_assignee['name']} +{len(assignees) - 1} more"
-
     worker_specializations = sorted({row.get("workerSpecialization") or "Other" for row in assignees})
     now = _now_iso()
-
     update = {
         "workerId": primary_assignee.get("workerId"),
         "workerIds": [row.get("workerId") for row in assignees if row.get("workerId")],
@@ -607,11 +529,9 @@ def assign_ticket(ticket_id: str, payload: TicketAssign, current_user: dict = De
         "assignedAt": now,
         "updatedAt": now,
     }
-
     op = {"$set": update}
     if payload.notes:
         op["$push"] = {"notes": _build_note_payload(payload.notes, current_user)}
-
     obj_id = to_object_id(ticket_id)
     tickets.update_one({"_id": obj_id}, op)
     doc = tickets.find_one({"_id": obj_id})
@@ -643,9 +563,8 @@ def assign_ticket(ticket_id: str, payload: TicketAssign, current_user: dict = De
             },
         )
         _notify_ticket_update(doc)
+        _emit_ticket_realtime_event("TICKET_UPDATED", doc, "workers_assigned")
     return {"success": True, "data": serialize_doc(doc)}
-
-
 @router.post("/{ticket_id}/progress-update")
 def update_ticket_progress(
     ticket_id: str,
@@ -658,16 +577,13 @@ def update_ticket_progress(
         raise HTTPException(status_code=403, detail="Access denied")
     if (existing.get("status") or "").strip().lower() == "resolved":
         raise HTTPException(status_code=400, detail="Resolved tickets cannot receive progress updates")
-
     update_text = (payload.updateText or "").strip()
     if len(update_text) < 5:
         raise HTTPException(status_code=400, detail="updateText must be at least 5 characters")
-
     prediction = predict_ticket_progress(update_text)
     now = _now_iso()
     progress_percent = int(max(0, min(100, prediction.percent)))
     confidence = round(max(0.0, min(1.0, float(prediction.confidence))), 4)
-
     set_payload = {
         "progressSummary": update_text,
         "progressPercent": progress_percent,
@@ -683,10 +599,8 @@ def update_ticket_progress(
         set_payload["inspectorReminderSentForDate"] = ""
     if role == ROLE_WORKER:
         set_payload["lastWorkerUpdateAt"] = now
-
     note_prefix = "Field Inspector update" if role == ROLE_FIELD_INSPECTOR else "Worker update"
     note_text = f"{note_prefix}: {update_text} ({progress_percent}%)"
-
     obj_id = to_object_id(ticket_id)
     tickets.update_one(
         {"_id": obj_id},
@@ -719,9 +633,8 @@ def update_ticket_progress(
                 "updateText": update_text,
             },
         )
+        _emit_ticket_realtime_event("TICKET_UPDATED", doc, "progress_updated")
     return {"success": True, "data": serialize_doc(doc)}
-
-
 @router.get("/{ticket_id}/logbook")
 def get_ticket_logbook_entries(ticket_id: str, current_user: dict = Depends(get_official_user)):
     _ensure_roles(current_user, ROLE_DEPARTMENT)

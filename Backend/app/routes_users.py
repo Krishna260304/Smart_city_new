@@ -6,13 +6,10 @@ from app.models import UserUpdate
 from app.roles import normalize_official_role
 from app.utils import serialize_doc, to_object_id
 from pymongo.errors import DuplicateKeyError
-
 router = APIRouter(prefix="/api/users")
-
 @router.get("/profile")
 def get_profile(current_user: dict = Depends(get_current_user)):
     return {"success": True, "data": current_user}
-
 @router.put("/profile")
 def update_profile(payload: UserUpdate, current_user: dict = Depends(get_current_user)):
     user_id = current_user.get("id")
@@ -32,8 +29,6 @@ def update_profile(payload: UserUpdate, current_user: dict = Depends(get_current
     if data:
         data.pop("password", None)
     return {"success": True, "data": data}
-
-
 @router.get("/workers")
 def list_workers(current_user: dict = Depends(require_official_roles("department", "supervisor"))):
     rows = list(

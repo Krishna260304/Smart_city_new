@@ -3,20 +3,15 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 from app.database import incidents, tickets, users
 from app.auth import get_official_user
-
 router = APIRouter(prefix="/api/analytics")
-
-
 def _parse_datetime(value):
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     if not isinstance(value, str):
         return None
-
     candidate = value.strip()
     if not candidate:
         return None
-
     if candidate.endswith("Z"):
         candidate = f"{candidate[:-1]}+00:00"
     try:
@@ -24,8 +19,6 @@ def _parse_datetime(value):
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def _day_key(value, default_day: str):
     parsed = _parse_datetime(value)
     if parsed is not None:
@@ -33,15 +26,11 @@ def _day_key(value, default_day: str):
     if isinstance(value, str) and len(value) >= 10:
         return value[:10]
     return default_day
-
-
 def _safe_float(value):
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
 def _status_breakdown(collection):
     total = collection.count_documents({})
     open_count = collection.count_documents({"status": "open"})
@@ -56,8 +45,6 @@ def _status_breakdown(collection):
         "resolved": resolved_count,
         "resolutionRate": round((resolved_count / total) * 100, 2) if total > 0 else 0,
     }
-
-
 def _average_resolution_hours():
     cursor = tickets.find({"status": "resolved"}, {"createdAt": 1, "updatedAt": 1})
     durations = []
@@ -69,12 +56,9 @@ def _average_resolution_hours():
         if updated_at < created_at:
             continue
         durations.append((updated_at - created_at).total_seconds() / 3600)
-
     if not durations:
         return 0
     return round(sum(durations) / len(durations), 2)
-
-
 def _build_worker_productivity():
     productivity_pipeline = [
         {"$match": {"assignedTo": {"$exists": True, "$nin": [None, ""]}}},
@@ -91,13 +75,11 @@ def _build_worker_productivity():
         {"$sort": {"resolved": -1, "total": -1}},
     ]
     worker_rows = list(tickets.aggregate(productivity_pipeline))
-
     user_lookup = {}
     for row in users.find({}, {"name": 1, "email": 1, "phone": 1}):
         key = str(row.get("_id"))
         label = row.get("name") or row.get("email") or row.get("phone") or key
         user_lookup[key] = label
-
     output = []
     for row in worker_rows:
         total = int(row.get("total", 0))
@@ -118,14 +100,11 @@ def _build_worker_productivity():
                 "resolutionRate": round((resolved / total) * 100, 2) if total > 0 else 0,
             }
         )
-
     return output
-
 @router.get("/dashboard")
 def dashboard(current_user: dict = Depends(get_official_user)):
     incident_stats = _status_breakdown(incidents)
     ticket_stats = _status_breakdown(tickets)
-
     category_pipeline = [
         {"$group": {"_id": "$category", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
@@ -138,18 +117,15 @@ def dashboard(current_user: dict = Depends(get_official_user)):
         {"category": key, "count": count}
         for key, count in sorted(category_totals.items(), key=lambda row: row[1], reverse=True)
     ]
-
     worker_productivity = _build_worker_productivity()
-
     total_incidents = incident_stats["total"]
     resolved_incidents = incident_stats["resolved"]
     city_cleanliness_score = incident_stats["resolutionRate"]
-    safety_incident_count = incidents.count_documents({"category": {"$in": ["safety", "fire", "emergency", "crowd"]}})
+    safety_incident_count = incidents.count_documents({"category": {"$in": ["safety", "emergency", "crowd"]}})
     safety_index = 100.0
     if total_incidents > 0:
         safety_pressure = safety_incident_count / total_incidents
         safety_index = max(0.0, round(100 - (safety_pressure * 100), 2))
-
     return {
         "success": True,
         "data": {
@@ -162,7 +138,6 @@ def dashboard(current_user: dict = Depends(get_official_user)):
             "workerProductivity": worker_productivity
         }
     }
-
 @router.get("/heatmap")
 def heatmap(current_user: dict = Depends(get_official_user)):
     points = []
@@ -190,7 +165,6 @@ def heatmap(current_user: dict = Depends(get_official_user)):
             "status": row.get("status")
         })
     return {"success": True, "data": points}
-
 @router.get("/trends")
 def trends(days: int = 14, current_user: dict = Depends(get_official_user)):
     days = min(max(days, 7), 60)

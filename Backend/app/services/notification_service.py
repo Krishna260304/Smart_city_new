@@ -2,7 +2,6 @@ import base64
 import json
 from urllib import request, parse, error
 from app.config.settings import settings
-
 def _normalize_phone(value: str) -> str:
     if not value:
         return ""
@@ -16,7 +15,6 @@ def _normalize_phone(value: str) -> str:
     if len(cleaned) == 12 and cleaned.startswith("91"):
         return f"+{cleaned}"
     return cleaned
-
 def _twilio_request(path: str, data: dict):
     sid = settings.TWILIO_ACCOUNT_SID
     token = settings.TWILIO_AUTH_TOKEN
@@ -41,7 +39,6 @@ def _twilio_request(path: str, data: dict):
         return False, payload
     except Exception as exc:
         return False, str(exc)
-
 def send_sms(to_phone: str, message: str):
     to_phone = _normalize_phone(to_phone)
     from_phone = _normalize_phone(settings.TWILIO_SMS_FROM)
@@ -52,7 +49,6 @@ def send_sms(to_phone: str, message: str):
         "From": from_phone,
         "Body": message
     })
-
 def send_whatsapp(to_phone: str, message: str):
     to_phone = _normalize_phone(to_phone)
     from_phone = _normalize_phone(settings.TWILIO_WHATSAPP_FROM)
@@ -63,7 +59,6 @@ def send_whatsapp(to_phone: str, message: str):
         "From": f"whatsapp:{from_phone}",
         "Body": message
     })
-
 def send_stakeholder_notifications(message: str):
     results = {"sms": None, "whatsapp": None}
     if settings.SMS_ALERT_TO:

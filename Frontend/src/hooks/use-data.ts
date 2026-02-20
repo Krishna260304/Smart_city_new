@@ -19,6 +19,28 @@ const createIncidentsSocket = () => {
   return new WebSocket(`${API_CONFIG.WS_BASE_URL}/ws/incidents`);
 };
 
+const normalizeFilterValue = (value?: string) => (value || '').trim().toLowerCase();
+
+const ticketMatchesFilters = (
+  ticket: Ticket,
+  filters?: { status?: string; priority?: string; category?: string }
+): boolean => {
+  const statusFilter = normalizeFilterValue(filters?.status);
+  const priorityFilter = normalizeFilterValue(filters?.priority);
+  const categoryFilter = normalizeFilterValue(filters?.category);
+
+  if (statusFilter && normalizeFilterValue(ticket.status) !== statusFilter) {
+    return false;
+  }
+  if (priorityFilter && normalizeFilterValue(ticket.priority) !== priorityFilter) {
+    return false;
+  }
+  if (categoryFilter && normalizeFilterValue(ticket.category) !== categoryFilter) {
+    return false;
+  }
+  return true;
+};
+
 export const useIncidents = () => {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
@@ -151,9 +173,60 @@ export const useTickets = (filters?: { status?: string; priority?: string; categ
     }
     const intervalId = window.setInterval(() => {
       void fetchTickets(true);
-    }, 15000);
+    }, 60000);
     return () => {
       window.clearInterval(intervalId);
+    };
+  }, [filters?.status, filters?.priority, filters?.category]);
+
+  useEffect(() => {
+    if (!hasAuthToken()) {
+      return;
+    }
+
+    const socket = createIncidentsSocket();
+    if (!socket) {
+      return;
+    }
+
+    const upsertTicket = (incoming: Ticket) => {
+      setTickets((prev) => {
+        const exists = prev.some((ticket) => ticket.id === incoming.id);
+        const matchesFilters = ticketMatchesFilters(incoming, filters);
+        if (!matchesFilters) {
+          return exists ? prev.filter((ticket) => ticket.id !== incoming.id) : prev;
+        }
+        if (exists) {
+          return prev.map((ticket) => (ticket.id === incoming.id ? incoming : ticket));
+        }
+        return [incoming, ...prev];
+      });
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (!payload || typeof payload !== 'object') {
+          return;
+        }
+        if ((payload.type === 'NEW_TICKET' || payload.type === 'TICKET_UPDATED') && payload.data) {
+          upsertTicket(payload.data as Ticket);
+          return;
+        }
+        if (payload.type === 'TICKET_DELETED') {
+          const ticketId = String(payload?.data?.id || payload?.ticketId || '').trim();
+          if (!ticketId) {
+            return;
+          }
+          setTickets((prev) => prev.filter((ticket) => ticket.id !== ticketId));
+        }
+      } catch {
+        return;
+      }
+    };
+
+    return () => {
+      socket.close();
     };
   }, [filters?.status, filters?.priority, filters?.category]);
 

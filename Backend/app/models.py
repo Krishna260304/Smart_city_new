@@ -1,5 +1,4 @@
 from pydantic import BaseModel
-
 class RegisterModel(BaseModel):
     name: str
     email: str | None = None
@@ -10,14 +9,12 @@ class RegisterModel(BaseModel):
     pincode: str | None = None
     officialRole: str | None = None
     workerSpecialization: str | None = None
-
 class LoginModel(BaseModel):
     email: str | None = None
     phone: str | None = None
     password: str
     expectedUserType: str | None = None
     expectedOfficialRole: str | None = None
-
 class IncidentCreate(BaseModel):
     title: str
     description: str
@@ -32,7 +29,6 @@ class IncidentCreate(BaseModel):
     source: str | None = None
     deviceId: str | None = None
     votes: int | None = None
-
 class IncidentUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -46,11 +42,9 @@ class IncidentUpdate(BaseModel):
     assignedTo: str | None = None
     severity: str | None = None
     scope: str | None = None
-
 class TicketUpdateStatus(BaseModel):
     status: str
     notes: str | None = None
-
 class TicketAssign(BaseModel):
     workerId: str | None = None
     workerIds: list[str] | None = None
@@ -59,14 +53,10 @@ class TicketAssign(BaseModel):
     assigneePhone: str | None = None
     assigneePhoto: str | None = None
     notes: str | None = None
-
-
 class TicketProgressUpdate(BaseModel):
     updateText: str
-
 class MessageCreate(BaseModel):
     message: str
-
 class UserUpdate(BaseModel):
     name: str | None = None
     phone: str | None = None
@@ -74,25 +64,17 @@ class UserUpdate(BaseModel):
     address: str | None = None
     pincode: str | None = None
     department: str | None = None
-
 class ForgotPasswordRequest(BaseModel):
     email: str | None = None
     phone: str | None = None
-
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str
-
-
 class OtpVerifyRequest(BaseModel):
     challengeId: str
     otp: str
-
-
 class PasswordChangeRequestOtp(BaseModel):
     currentPassword: str
-
-
 class PasswordChangeConfirm(BaseModel):
     challengeId: str
     otp: str

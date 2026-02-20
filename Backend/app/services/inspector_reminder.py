@@ -1,20 +1,15 @@
 from __future__ import annotations
-
 import logging
 import threading
 import time
 from datetime import datetime, time as time_value, timedelta, timezone
-
 from app.config.settings import settings
 from app.database import tickets, users
 from app.roles import normalize_official_role
 from app.services.email_service import send_field_inspector_reminder_email
 from app.utils import to_object_id
-
 LOGGER = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
-
-
 def _parse_dt(value):
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
@@ -30,8 +25,6 @@ def _parse_dt(value):
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def _resolve_field_inspector_user(field_inspector_id: str | None):
     if not field_inspector_id:
         return None
@@ -47,13 +40,10 @@ def _resolve_field_inspector_user(field_inspector_id: str | None):
     if normalize_official_role(doc.get("officialRole")) != "field_inspector":
         return None
     return doc
-
-
 def _collect_recipient_inspectors(ticket_doc: dict) -> list[dict]:
     assigned = _resolve_field_inspector_user(ticket_doc.get("fieldInspectorId"))
     if assigned and assigned.get("email"):
         return [assigned]
-
     return list(
         users.find(
             {
@@ -64,31 +54,24 @@ def _collect_recipient_inspectors(ticket_doc: dict) -> list[dict]:
             {"name": 1, "email": 1},
         )
     )
-
-
 def run_inspector_reminder_pass():
     now_utc = datetime.now(timezone.utc)
     now_ist = now_utc.astimezone(IST)
     if now_ist.time() < time_value(hour=18, minute=0):
         return
-
     today_ist = now_ist.date()
     today_key = today_ist.isoformat()
-
     cursor = tickets.find({"status": "in_progress"})
     for ticket_doc in cursor:
         last_update = _parse_dt(ticket_doc.get("lastInspectorUpdateAt"))
         updated_today = bool(last_update and last_update.astimezone(IST).date() == today_ist)
         if updated_today:
             continue
-
         if (ticket_doc.get("inspectorReminderSentForDate") or "").strip() == today_key:
             continue
-
         recipients = _collect_recipient_inspectors(ticket_doc)
         if not recipients:
             continue
-
         ticket_id = str(ticket_doc.get("_id"))
         ticket_title = ticket_doc.get("title") or "Untitled ticket"
         sent_any = False
@@ -113,8 +96,6 @@ def run_inspector_reminder_pass():
                 {"_id": ticket_doc.get("_id")},
                 {"$set": {"inspectorReminderSentForDate": today_key}},
             )
-
-
 def _worker_loop():
     interval = max(int(settings.INSPECTOR_REMINDER_INTERVAL_SECONDS), 60)
     while True:
@@ -124,8 +105,6 @@ def _worker_loop():
         except Exception as exc:
             LOGGER.warning("Field inspector reminder loop failed: %s", exc)
         time.sleep(interval)
-
-
 def start_inspector_reminder_worker():
     if not settings.INSPECTOR_REMINDER_ENABLED:
         LOGGER.info("Field inspector reminder worker disabled by configuration.")

@@ -32,6 +32,34 @@ const statusStyles: Record<string, string> = {
   rejected: 'badge-destructive',
 };
 
+const IST_DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  timeZone: 'Asia/Kolkata',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+};
+
+const parseIsoAsUtc = (value: string): Date | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(trimmed);
+  const normalized = hasTimezone ? trimmed : `${trimmed}Z`;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const formatDateTimeIST = (value?: string) => {
+  if (!value) return '-';
+  const parsed = parseIsoAsUtc(value);
+  if (!parsed) return value;
+  return `${parsed.toLocaleString('en-IN', IST_DATE_TIME_OPTIONS)} IST`;
+};
+
 const Dashboard = () => {
   const { incidents, loading, error, refetch } = useIncidents();
   const [query, setQuery] = useState('');
@@ -364,10 +392,10 @@ const Dashboard = () => {
                   )}
                   <div className="border-t border-border pt-4">
                     <div className="text-xs text-muted-foreground">
-                      Created: {new Date(selected.createdAt).toLocaleString()}
+                      Created: {formatDateTimeIST(selected.createdAt)}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      Updated: {selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '-'}
+                      Updated: {formatDateTimeIST(selected.updatedAt)}
                     </div>
                   </div>
                 </div>

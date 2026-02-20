@@ -23,15 +23,12 @@ from app.config.settings import settings
 from app.issue_model import IssueIn
 from app.auth import get_current_user, get_official_user, is_official_account
 from app.utils import serialize_doc, serialize_list, to_object_id
-
 router = APIRouter(prefix="/api")
 LOGGER = logging.getLogger(__name__)
 INCIDENT_STATUSES = {"open", "pending", "in_progress", "resolved"}
 CRITICAL_APPROVAL_ROLES = {"supervisor", "department"}
-
 def _now_iso():
     return datetime.utcnow().isoformat()
-
 def _save_images(images: list[str] | None):
     image_urls = []
     if not images:
@@ -46,7 +43,6 @@ def _save_images(images: list[str] | None):
         filename = os.path.basename(path)
         image_urls.append(f"/images/{filename}")
     return image_urls
-
 def _get_incident_doc(incident_id: str):
     try:
         obj_id = to_object_id(incident_id)
@@ -56,10 +52,8 @@ def _get_incident_doc(incident_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Incident not found")
     return doc
-
 def _is_official(user: dict):
     return is_official_account(user)
-
 def _can_access_incident(doc: dict, user: dict):
     if _is_official(user):
         return True
@@ -67,7 +61,6 @@ def _can_access_incident(doc: dict, user: dict):
     if reporter_id and reporter_id == user.get("id"):
         return True
     return False
-
 def _notify_new_issue(description: str, lat: float | None, lon: float | None):
     try:
         send_alert_email(description, lat, lon)
@@ -78,7 +71,6 @@ def _notify_new_issue(description: str, lat: float | None, lon: float | None):
         send_stakeholder_notifications(text)
     except Exception as exc:
         LOGGER.warning("Stakeholder notification failed: %s", exc)
-
 def _normalize_incident_status(value: str | None) -> str | None:
     if value is None:
         return None
@@ -88,7 +80,6 @@ def _normalize_incident_status(value: str | None) -> str | None:
     if status in {"pending_review", "under_review"}:
         return "pending"
     return status
-
 def _resolve_reporter_email(
     reporter_email: str | None,
     reporter_id: str | None,
@@ -97,7 +88,6 @@ def _resolve_reporter_email(
     email_value = (reporter_email or "").strip()
     if email_value and "@" in email_value:
         return email_value
-
     if reporter_id:
         user_doc = None
         try:
@@ -107,15 +97,12 @@ def _resolve_reporter_email(
         fallback_email = (user_doc or {}).get("email")
         if fallback_email and "@" in fallback_email:
             return fallback_email.strip()
-
     if reporter_phone:
         user_doc = users.find_one({"phone": reporter_phone}, {"email": 1})
         fallback_email = (user_doc or {}).get("email")
         if fallback_email and "@" in fallback_email:
             return fallback_email.strip()
-
     return None
-
 def _send_incident_submission_email_safe(
     to_email: str,
     incident_id: str,
@@ -139,17 +126,13 @@ def _send_incident_submission_email_safe(
         )
     except Exception as exc:
         LOGGER.warning("Incident submission email delivery failed for %s: %s", to_email, exc)
-
 def _is_valid_email(value: str | None) -> bool:
     email = (value or "").strip()
     return bool(email and "@" in email and "." in email)
-
 def _normalize_role(value: str | None) -> str:
     return (value or "").strip().lower().replace("-", "_").replace(" ", "_")
-
 def _hash_token(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
 def _resolve_critical_review_recipients() -> list[dict]:
     query = {
         "$or": [
@@ -160,18 +143,15 @@ def _resolve_critical_review_recipients() -> list[dict]:
     cursor = users.find(query, {"email": 1, "name": 1, "officialRole": 1, "userType": 1})
     recipients: list[dict] = []
     seen_emails: set[str] = set()
-
     for row in cursor:
         email = (row.get("email") or "").strip().lower()
         if not _is_valid_email(email) or email in seen_emails:
             continue
-
         role = _normalize_role(row.get("officialRole"))
         if role not in CRITICAL_APPROVAL_ROLES:
             role = "supervisor" if _normalize_role(row.get("userType")) == "head_supervisor" else ""
         if role not in CRITICAL_APPROVAL_ROLES:
             continue
-
         seen_emails.add(email)
         approve_token = secrets.token_urlsafe(24)
         reject_token = secrets.token_urlsafe(24)
@@ -189,7 +169,6 @@ def _resolve_critical_review_recipients() -> list[dict]:
             }
         )
     return recipients
-
 def _build_critical_review_action_links(incident_id: str, approve_token: str, reject_token: str) -> tuple[str, str]:
     base = settings.DOMAIN.rstrip("/")
     approve_query = urlencode(
@@ -203,7 +182,6 @@ def _build_critical_review_action_links(incident_id: str, approve_token: str, re
     approve_url = f"{base}/api/incidents/review/email?{approve_query}"
     reject_url = f"{base}/api/incidents/review/email?{reject_query}"
     return approve_url, reject_url
-
 def _to_public_url(path_value: str | None) -> str | None:
     value = (path_value or "").strip()
     if not value:
@@ -212,17 +190,14 @@ def _to_public_url(path_value: str | None) -> str | None:
         return value
     normalized = value if value.startswith("/") else f"/{value}"
     return f"{settings.DOMAIN.rstrip('/')}{normalized}"
-
 def _build_critical_email_details(payload: dict) -> tuple[list[tuple[str, str]], list[str]]:
     details: list[tuple[str, str]] = []
     description = (payload.get("description") or "").strip()
     if description:
         details.append(("Description", description))
-
     status_value = (payload.get("status") or "").strip()
     if status_value:
         details.append(("Current Status", status_value.replace("_", " ").title()))
-
     for key, label in (
         ("severity", "Severity"),
         ("scope", "Scope"),
@@ -236,12 +211,10 @@ def _build_critical_email_details(payload: dict) -> tuple[list[tuple[str, str]],
         value = str(payload.get(key) or "").strip()
         if value:
             details.append((label, value))
-
     lat = payload.get("latitude")
     lon = payload.get("longitude")
     if lat is not None and lon is not None:
         details.append(("Coordinates", f"{lat}, {lon}"))
-
     image_urls: list[str] = []
     raw_urls = payload.get("imageUrls")
     if isinstance(raw_urls, list):
@@ -253,9 +226,7 @@ def _build_critical_email_details(payload: dict) -> tuple[list[tuple[str, str]],
         public_url = _to_public_url(str(payload.get("imageUrl") or ""))
         if public_url:
             image_urls.append(public_url)
-
     return details, image_urls
-
 def _send_critical_review_email_safe(
     to_email: str,
     reviewer_name: str,
@@ -287,7 +258,6 @@ def _send_critical_review_email_safe(
         )
     except Exception as exc:
         LOGGER.warning("Critical incident review email failed for %s: %s", to_email, exc)
-
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     candidate = (value or "").strip()
     if not candidate:
@@ -301,7 +271,6 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     if parsed.tzinfo:
         return parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return parsed
-
 def _incident_review_html(title: str, message: str) -> HTMLResponse:
     html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -313,7 +282,6 @@ def _incident_review_html(title: str, message: str) -> HTMLResponse:
         "</div></body></html>"
     )
     return HTMLResponse(content=html)
-
 def _sanitize_incident_payload(payload: dict | None) -> dict | None:
     if not isinstance(payload, dict):
         return payload
@@ -329,10 +297,18 @@ def _sanitize_incident_payload(payload: dict | None) -> dict | None:
             recipient.pop("rejectTokenHash", None)
     return payload
 
+def _generate_ticket_id():
+    now = datetime.utcnow()
+    yymm = now.strftime("%y%m")
+    count = tickets.count_documents({"ticketId": {"$regex": f"^{yymm}_"}})
+    ticket_number = count + 1
+    return f"{yymm}_{ticket_number}"
+
 def _create_ticket_from_incident(doc: dict):
     if not doc:
         return None
     ticket_doc = {
+        "ticketId": _generate_ticket_id(),
         "title": doc.get("title"),
         "description": doc.get("description"),
         "category": doc.get("category"),
@@ -352,6 +328,14 @@ def _create_ticket_from_incident(doc: dict):
     result = tickets.insert_one(ticket_doc)
     return result.inserted_id
 
+
+def _emit_ticket_realtime_event(event_type: str, ticket_doc: dict | None, reason: str | None = None) -> None:
+    if not ticket_doc:
+        return
+    payload = {"type": event_type, "data": serialize_doc(ticket_doc)}
+    if reason:
+        payload["reason"] = reason
+    manager.publish(payload)
 @router.get("/incidents")
 @router.get("/issues")
 def get_incidents(current_user: dict = Depends(get_current_user)):
@@ -362,7 +346,6 @@ def get_incidents(current_user: dict = Depends(get_current_user)):
     serialized = serialize_list(data)
     safe_data = [_sanitize_incident_payload(item) for item in serialized]
     return {"success": True, "data": safe_data}
-
 @router.get("/incidents/stats")
 @router.get("/issues/stats")
 def stats(current_user: dict = Depends(get_current_user)):
@@ -384,7 +367,6 @@ def stats(current_user: dict = Depends(get_current_user)):
             "pending": pending_c
         }
     }
-
 @router.get("/incidents/{incident_id}")
 @router.get("/issues/{incident_id}")
 def get_incident(incident_id: str, current_user: dict = Depends(get_current_user)):
@@ -392,7 +374,6 @@ def get_incident(incident_id: str, current_user: dict = Depends(get_current_user
     if not _can_access_incident(doc, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
     return {"success": True, "data": _sanitize_incident_payload(serialize_doc(doc))}
-
 @router.post("/incidents")
 @router.post("/issues")
 async def create_incident(
@@ -406,7 +387,6 @@ async def create_incident(
     incident_status = "open"
     should_alert_stakeholders = True
     critical_email_recipients: list[dict] = []
-
     if not _is_official(current_user):
         validation = validate_incident_report(
             title=data.get("title"),
@@ -424,7 +404,6 @@ async def create_incident(
             "source": validation.source,
             "evaluatedAt": now,
         }
-
         if validation.is_valid:
             priority_prediction = predict_incident_priority(
                 title=data.get("title"),
@@ -434,6 +413,7 @@ async def create_incident(
                 scope=data.get("scope"),
                 source=data.get("source"),
                 location=data.get("location"),
+                image_payload=images[0] if images else None,
             )
             data["priority"] = priority_prediction.priority
             data["aiPriority"] = {
@@ -442,7 +422,6 @@ async def create_incident(
                 "source": priority_prediction.source,
                 "evaluatedAt": now,
             }
-
             is_critical = (priority_prediction.priority or "").strip().lower() == "critical"
             if is_critical and settings.CRITICAL_INCIDENT_EMAIL_APPROVAL_ENABLED:
                 incident_status = "pending"
@@ -450,7 +429,6 @@ async def create_incident(
                 recipients = _resolve_critical_review_recipients()
                 ttl_hours = max(int(settings.CRITICAL_INCIDENT_EMAIL_APPROVAL_EXPIRE_HOURS), 1)
                 expires_at = (datetime.utcnow() + timedelta(hours=ttl_hours)).isoformat()
-
                 persisted_recipients: list[dict] = []
                 for recipient in recipients:
                     persisted_recipients.append(
@@ -464,7 +442,6 @@ async def create_incident(
                             "rejectTokenHash": recipient.get("rejectTokenHash"),
                         }
                     )
-
                 if persisted_recipients:
                     data["criticalApproval"] = {
                         "required": True,
@@ -489,12 +466,10 @@ async def create_incident(
             data["pendingReason"] = "ai_validation_review_required"
             data["reviewRequired"] = True
             should_alert_stakeholders = False
-
     image_urls = _save_images(images)
     if image_urls:
         data["imageUrls"] = image_urls
         data["imageUrl"] = image_urls[0]
-
     data.update({
         "status": incident_status,
         "createdAt": now,
@@ -514,9 +489,11 @@ async def create_incident(
     result = incidents.insert_one(data)
     doc = incidents.find_one({"_id": result.inserted_id})
     ticket_id = _create_ticket_from_incident(doc)
+    ticket_doc = None
     if ticket_id:
         incidents.update_one({"_id": result.inserted_id}, {"$set": {"ticketId": str(ticket_id)}})
         doc = incidents.find_one({"_id": result.inserted_id})
+        ticket_doc = tickets.find_one({"_id": ticket_id})
     payload = _sanitize_incident_payload(serialize_doc(doc)) or {}
     reporter_email = _resolve_reporter_email(
         payload.get("reporterEmail"),
@@ -537,7 +514,6 @@ async def create_incident(
         )
     elif not _is_official(current_user):
         LOGGER.warning("Incident submission email skipped: reporter email unavailable for incident %s", payload.get("id"))
-
     if critical_email_recipients and payload.get("id"):
         extra_details, image_urls = _build_critical_email_details(payload)
         for recipient in critical_email_recipients:
@@ -566,41 +542,40 @@ async def create_incident(
                 extra_details,
                 image_urls,
             )
-
     if should_alert_stakeholders:
         _notify_new_issue(payload.get("description", ""), payload.get("latitude"), payload.get("longitude"))
     await manager.broadcast({
         "type": "NEW_INCIDENT",
         "data": payload
     })
+    if ticket_doc:
+        await manager.broadcast({
+            "type": "NEW_TICKET",
+            "reason": "incident_created",
+            "data": serialize_doc(ticket_doc),
+        })
     return {"success": True, "data": payload}
-
 @router.get("/incidents/review/email", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/issues/review/email", response_class=HTMLResponse, include_in_schema=False)
 def review_critical_incident_via_email(incidentId: str, decision: str, token: str):
     decision_value = (decision or "").strip().lower()
     if decision_value not in {"approve", "reject"}:
         return _incident_review_html("Invalid Action", "The review action is invalid.")
-
     token_value = (token or "").strip()
     if not token_value:
         return _incident_review_html("Invalid Link", "This review link is invalid or incomplete.")
-
     try:
         doc = _get_incident_doc(incidentId)
     except HTTPException as exc:
         if exc.status_code == 404:
             return _incident_review_html("Incident Not Found", "This incident review link is no longer valid.")
         return _incident_review_html("Invalid Incident", "This incident review link is invalid.")
-
     approval_block = doc.get("criticalApproval")
     if not isinstance(approval_block, dict) or not approval_block.get("required"):
         return _incident_review_html("Review Not Required", "This incident does not require email approval.")
-
     current_state = (approval_block.get("state") or "").strip().lower()
     if current_state == "approved":
         return _incident_review_html("Already Approved", "This incident has already been approved and moved to in progress.")
-
     expires_at = _parse_iso_datetime(approval_block.get("expiresAt"))
     now_dt = datetime.utcnow()
     if expires_at and now_dt > expires_at:
@@ -616,12 +591,10 @@ def review_critical_incident_via_email(incidentId: str, decision: str, token: st
             },
         )
         return _incident_review_html("Review Expired", "This review link has expired. Please review the incident in dashboard.")
-
     hashed_token = _hash_token(token_value)
     recipients = approval_block.get("recipients")
     if not isinstance(recipients, list) or not recipients:
         return _incident_review_html("Review Unavailable", "No reviewer records were found for this incident.")
-
     matched = None
     expected_key = "approveTokenHash" if decision_value == "approve" else "rejectTokenHash"
     for recipient in recipients:
@@ -629,18 +602,14 @@ def review_critical_incident_via_email(incidentId: str, decision: str, token: st
         if expected_hash and secrets.compare_digest(expected_hash, hashed_token):
             matched = recipient
             break
-
     if not matched:
         return _incident_review_html("Invalid Link", "This review link is invalid or has already been replaced.")
-
     prior_decision = (matched.get("decision") or "pending").strip().lower()
     if prior_decision == decision_value:
         return _incident_review_html("Already Submitted", "Your decision was already recorded for this incident.")
-
     now_iso = _now_iso()
     matched["decision"] = decision_value
     matched["decisionAt"] = now_iso
-
     approvals = 0
     pending = 0
     for recipient in recipients:
@@ -649,11 +618,9 @@ def review_critical_incident_via_email(incidentId: str, decision: str, token: st
             approvals += 1
         elif user_decision not in {"reject"}:
             pending += 1
-
     incident_status = _normalize_incident_status(doc.get("status")) or "pending"
     new_state = "pending"
     pending_reason = doc.get("pendingReason")
-
     if approvals > 0:
         new_state = "approved"
         incident_status = "in_progress"
@@ -662,7 +629,6 @@ def review_critical_incident_via_email(incidentId: str, decision: str, token: st
         new_state = "rejected"
         incident_status = "pending"
         pending_reason = "critical_email_rejected"
-
     set_updates = {
         "criticalApproval.recipients": recipients,
         "criticalApproval.state": new_state,
@@ -676,7 +642,6 @@ def review_critical_incident_via_email(incidentId: str, decision: str, token: st
     else:
         update_op["$unset"] = {"pendingReason": ""}
     incidents.update_one({"_id": doc.get("_id")}, update_op)
-
     tickets.update_one(
         {"incidentId": str(doc.get("_id"))},
         {
@@ -686,24 +651,22 @@ def review_critical_incident_via_email(incidentId: str, decision: str, token: st
             }
         },
     )
-
+    ticket_doc = tickets.find_one({"incidentId": str(doc.get("_id"))})
+    _emit_ticket_realtime_event("TICKET_UPDATED", ticket_doc, "critical_email_review")
     if incident_status == "in_progress":
         return _incident_review_html(
             "Incident Approved",
             "Your approval has been recorded. The incident was moved to in progress.",
         )
-
     if decision_value == "reject":
         return _incident_review_html(
             "Incident Rejected",
             "Your rejection has been recorded. The incident remains pending for supervisor review.",
         )
-
     return _incident_review_html(
         "Decision Recorded",
         "Your decision was saved. The incident is awaiting remaining reviewer decisions.",
     )
-
 @router.post("/report")
 async def report_issue(issue: IssueIn):
     image_url = None
@@ -738,17 +701,24 @@ async def report_issue(issue: IssueIn):
     result = incidents.insert_one(data)
     doc = incidents.find_one({"_id": result.inserted_id})
     ticket_id = _create_ticket_from_incident(doc)
+    ticket_doc = None
     if ticket_id:
         incidents.update_one({"_id": result.inserted_id}, {"$set": {"ticketId": str(ticket_id)}})
         doc = incidents.find_one({"_id": result.inserted_id})
+        ticket_doc = tickets.find_one({"_id": ticket_id})
     payload = _sanitize_incident_payload(serialize_doc(doc)) or {}
     _notify_new_issue(issue.description, issue.latitude, issue.longitude)
     await manager.broadcast({
         "type": "NEW_INCIDENT",
         "data": payload
     })
+    if ticket_doc:
+        await manager.broadcast({
+            "type": "NEW_TICKET",
+            "reason": "issue_reported",
+            "data": serialize_doc(ticket_doc),
+        })
     return {"success": True, "data": payload}
-
 @router.put("/incidents/{incident_id}")
 @router.put("/issues/{incident_id}")
 def update_incident(incident_id: str, incident: IncidentUpdate, current_user: dict = Depends(get_official_user)):
@@ -777,6 +747,8 @@ def update_incident(incident_id: str, incident: IncidentUpdate, current_user: di
         if ticket_updates:
             ticket_updates["updatedAt"] = doc.get("updatedAt")
             tickets.update_one({"incidentId": str(doc.get("_id"))}, {"$set": ticket_updates})
+            ticket_doc = tickets.find_one({"incidentId": str(doc.get("_id"))})
+            _emit_ticket_realtime_event("TICKET_UPDATED", ticket_doc, "incident_updated")
         resolved_email = _resolve_reporter_email(
             doc.get("reporterEmail"),
             doc.get("reporterId"),
@@ -794,7 +766,6 @@ def update_incident(incident_id: str, incident: IncidentUpdate, current_user: di
         elif updates.get("status") == "resolved":
             LOGGER.warning("Resolved notification email skipped: reporter email unavailable for incident %s", incident_id)
     return {"success": True, "data": _sanitize_incident_payload(serialize_doc(doc))}
-
 @router.delete("/incidents/{incident_id}")
 @router.delete("/issues/{incident_id}")
 def delete_incident(incident_id: str, current_user: dict = Depends(get_official_user)):
@@ -805,7 +776,6 @@ def delete_incident(incident_id: str, current_user: dict = Depends(get_official_
     messages.delete_many({"incidentId": incident_id})
     tickets.delete_many({"incidentId": incident_id})
     return {"success": True, "data": True}
-
 @router.get("/incidents/{incident_id}/messages")
 @router.get("/issues/{incident_id}/messages")
 def get_messages(incident_id: str, current_user: dict = Depends(get_current_user)):
@@ -814,7 +784,6 @@ def get_messages(incident_id: str, current_user: dict = Depends(get_current_user
         raise HTTPException(status_code=403, detail="Access denied")
     data = list(messages.find({"incidentId": incident_id}).sort("createdAt", 1))
     return {"success": True, "data": serialize_list(data)}
-
 @router.post("/incidents/{incident_id}/messages")
 @router.post("/issues/{incident_id}/messages")
 async def create_message(incident_id: str, payload: MessageCreate, current_user: dict = Depends(get_current_user)):

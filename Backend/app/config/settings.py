@@ -2,23 +2,17 @@ import os
 import secrets
 from pathlib import Path
 from dotenv import load_dotenv
-
 _BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(_BASE_DIR / ".env")
-
 def _split_env_list(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
-
-
 def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     if value is None:
@@ -27,8 +21,6 @@ def _env_int(name: str, default: int) -> int:
         return int(value.strip())
     except ValueError:
         return default
-
-
 def _env_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None:
@@ -37,8 +29,6 @@ def _env_float(name: str, default: float) -> float:
         return float(value.strip())
     except ValueError:
         return default
-
-
 def _resolve_secret_key() -> str:
     value = os.getenv("SECRET_KEY")
     if value:
@@ -46,15 +36,11 @@ def _resolve_secret_key() -> str:
     if os.getenv("ENV", "development").lower() == "production":
         raise RuntimeError("SECRET_KEY is required in production")
     return secrets.token_urlsafe(48)
-
-
 class Settings:
     ENV = os.getenv("ENV", "development")
     PROJECT_NAME = os.getenv("PROJECT_NAME", "SafeLive")
-
     MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
     DB_NAME = os.getenv("DB_NAME", "safelive")
-
     SECRET_KEY = _resolve_secret_key()
     ALGORITHM = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
@@ -62,10 +48,8 @@ class Settings:
     OTP_EXPIRE_MINUTES = _env_int("OTP_EXPIRE_MINUTES", 10)
     OTP_MAX_ATTEMPTS = _env_int("OTP_MAX_ATTEMPTS", 5)
     OTP_MIN_RESEND_SECONDS = _env_int("OTP_MIN_RESEND_SECONDS", 30)
-
     BASE_DIR = _BASE_DIR
     IMAGE_DIR = os.getenv("IMAGE_DIR", str(BASE_DIR / "images"))
-
     EMAIL_ENABLED = _env_bool("EMAIL_ENABLED", True)
     EMAIL_USER = os.getenv("EMAIL_USER", "safelive.alerts@gmail.com")
     EMAIL_PASS = os.getenv("EMAIL_PASS", "")
@@ -89,11 +73,18 @@ class Settings:
     TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
     TWILIO_SMS_FROM = os.getenv("TWILIO_SMS_FROM", "")
     TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "")
-
     DOMAIN = os.getenv("DOMAIN", "https://safelive.in")
     PRIORITY_AI_ENABLED = _env_bool("PRIORITY_AI_ENABLED", True)
-    PRIORITY_AI_MODEL = os.getenv("PRIORITY_AI_MODEL", "typeform/distilbert-base-uncased-mnli")
+    PRIORITY_AI_MODEL = os.getenv("PRIORITY_AI_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct")
+    PRIORITY_AI_TEXT_MODEL = os.getenv("PRIORITY_AI_TEXT_MODEL", "facebook/bart-large-mnli")
     PRIORITY_AI_MODEL_WEIGHT = _env_float("PRIORITY_AI_MODEL_WEIGHT", 0.35)
+    PRIORITY_AI_VISION_WEIGHT = _env_float("PRIORITY_AI_VISION_WEIGHT", 0.5)
+    PRIORITY_AI_TEXT_WEIGHT = _env_float("PRIORITY_AI_TEXT_WEIGHT", 0.3)
+    PRIORITY_AI_DATASET_WEIGHT = _env_float("PRIORITY_AI_DATASET_WEIGHT", 0.2)
+    PRIORITY_AI_ENABLE_DATASET_MODEL = _env_bool("PRIORITY_AI_ENABLE_DATASET_MODEL", True)
+    PRIORITY_AI_MIN_TRAIN_SAMPLES = _env_int("PRIORITY_AI_MIN_TRAIN_SAMPLES", 30)
+    PRIORITY_AI_MAX_TRAIN_ROWS = _env_int("PRIORITY_AI_MAX_TRAIN_ROWS", 50000)
+    PRIORITY_AI_EXTERNAL_DATASET = os.getenv("PRIORITY_AI_EXTERNAL_DATASET", "")
     PRIORITY_AI_OFFLINE_MODE = _env_bool("PRIORITY_AI_OFFLINE_MODE", False)
     PRIORITY_AI_REQUEST_TIMEOUT_SECONDS = _env_int("PRIORITY_AI_REQUEST_TIMEOUT_SECONDS", 10)
     PROGRESS_AI_ENABLED = _env_bool("PROGRESS_AI_ENABLED", True)
@@ -111,9 +102,7 @@ class Settings:
         "http://localhost:8080",
         "http://127.0.0.1:8080",
     ]
-
 settings = Settings()
-
 if settings.ENV.lower() == "production":
     if settings.EMAIL_ENABLED and not os.getenv("EMAIL_PASS"):
         raise RuntimeError("EMAIL_PASS is required in production")

@@ -1,6 +1,4 @@
 from pydantic import BaseModel
-
-
 class IssueIn(BaseModel):
     description: str
     latitude: float

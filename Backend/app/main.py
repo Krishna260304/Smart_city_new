@@ -17,10 +17,8 @@ from app.services.priority_ai import warmup_priority_model
 from app.services.progress_ai import warmup_progress_model
 from app.services.inspector_reminder import start_inspector_reminder_worker
 from app.services.auto_progress_tracker import start_auto_progress_tracker_worker
-
 app = FastAPI(title="SafeLive Smart Incident Backend")
 LOGGER = logging.getLogger(__name__)
-
 app.add_middleware(
 	CORSMiddleware,
 	allow_origins=settings.CORS_ORIGINS,
@@ -28,10 +26,8 @@ app.add_middleware(
 	allow_methods=["*"],
 	allow_headers=["*"],
 )
-
 os.makedirs(settings.IMAGE_DIR, exist_ok=True)
 app.mount("/images", StaticFiles(directory=settings.IMAGE_DIR), name="images")
-
 app.include_router(auth_router)
 app.include_router(incident_router)
 app.include_router(ticket_router)
@@ -39,23 +35,16 @@ app.include_router(ws_router)
 app.include_router(users_router)
 app.include_router(analytics_router)
 app.include_router(public_router)
-
 def _warmup_priority_model_background():
     try:
         warmup_priority_model()
     except Exception as exc:
-        # Do not block API startup if model warmup fails.
         LOGGER.warning("Incident priority model warmup failed during startup: %s", exc)
-
-
 def _warmup_progress_model_background():
     try:
         warmup_progress_model()
     except Exception as exc:
-        # Do not block API startup if model warmup fails.
         LOGGER.warning("Ticket progress model warmup failed during startup: %s", exc)
-
-
 @app.on_event("startup")
 def startup():
     init_db()

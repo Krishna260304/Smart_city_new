@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import logging
 import re
 import smtplib
@@ -10,21 +9,13 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from email.utils import formataddr
 from html import escape
-
 from app.config.settings import settings
-
 LOGGER = logging.getLogger(__name__)
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
 class EmailConfigurationError(RuntimeError):
     pass
-
-
 class EmailDeliveryError(RuntimeError):
     pass
-
-
 @dataclass(frozen=True)
 class EmailDeliveryResult:
     ok: bool
@@ -32,8 +23,6 @@ class EmailDeliveryResult:
     subject: str
     attempts: int
     error: str | None = None
-
-
 def _validate_recipient(to_email: str) -> str:
     recipient = (to_email or "").strip()
     if not recipient:
@@ -41,16 +30,12 @@ def _validate_recipient(to_email: str) -> str:
     if not EMAIL_REGEX.match(recipient):
         raise EmailDeliveryError(f"Invalid recipient email: {recipient}")
     return recipient
-
-
 def _from_header_value() -> str:
     sender_name = settings.EMAIL_FROM_NAME.strip()
     sender_address = settings.EMAIL_FROM.strip()
     if sender_name:
         return formataddr((sender_name, sender_address))
     return sender_address
-
-
 def _assert_email_configuration() -> None:
     if not settings.EMAIL_ENABLED:
         raise EmailConfigurationError("Email service is disabled (EMAIL_ENABLED=false)")
@@ -64,8 +49,6 @@ def _assert_email_configuration() -> None:
         raise EmailConfigurationError("SMTP_PORT must be a positive integer")
     if settings.EMAIL_MAX_RETRIES <= 0:
         raise EmailConfigurationError("EMAIL_MAX_RETRIES must be a positive integer")
-
-
 def _build_message(subject: str, to_email: str, text_body: str, html_body: str | None) -> EmailMessage:
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -77,8 +60,6 @@ def _build_message(subject: str, to_email: str, text_body: str, html_body: str |
     if html_body:
         msg.add_alternative(html_body, subtype="html")
     return msg
-
-
 def _send_once(msg: EmailMessage) -> None:
     timeout = max(5, settings.SMTP_TIMEOUT_SECONDS)
     if settings.SMTP_USE_SSL:
@@ -91,7 +72,6 @@ def _send_once(msg: EmailMessage) -> None:
             server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
             server.send_message(msg)
         return
-
     with smtplib.SMTP(host=settings.SMTP_HOST, port=settings.SMTP_PORT, timeout=timeout) as server:
         server.ehlo()
         if settings.SMTP_USE_TLS:
@@ -99,13 +79,10 @@ def _send_once(msg: EmailMessage) -> None:
             server.ehlo()
         server.login(settings.EMAIL_USER, settings.EMAIL_PASS)
         server.send_message(msg)
-
-
 def send_email(subject: str, to_email: str, text_body: str, html_body: str | None = None) -> EmailDeliveryResult:
     _assert_email_configuration()
     recipient = _validate_recipient(to_email)
     message = _build_message(subject=subject.strip(), to_email=recipient, text_body=text_body, html_body=html_body)
-
     last_error: str | None = None
     max_attempts = settings.EMAIL_MAX_RETRIES
     for attempt in range(1, max_attempts + 1):
@@ -135,13 +112,10 @@ def send_email(subject: str, to_email: str, text_body: str, html_body: str | Non
             if attempt < max_attempts:
                 delay_seconds = settings.EMAIL_RETRY_BACKOFF_SECONDS * attempt
                 time.sleep(max(0.1, delay_seconds))
-
     error_message = (
         f"Unable to deliver email to {recipient} after {max_attempts} attempt(s): {last_error or 'unknown error'}"
     )
     raise EmailDeliveryError(error_message)
-
-
 def _render_email_frame(
     title: str,
     intro: str,
@@ -181,8 +155,6 @@ def _render_email_frame(
         "SafeLive notification service</td></tr>"
         "</table></td></tr></table></body></html>"
     )
-
-
 def send_alert_email(description: str, lat: float | None, lon: float | None) -> EmailDeliveryResult:
     subject = "SafeLive Alert"
     intro = "A new issue was detected and requires attention."
@@ -200,8 +172,6 @@ def send_alert_email(description: str, lat: float | None, lon: float | None) -> 
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=settings.EMAIL_ALERT_TO, text_body=text_body, html_body=html_body)
-
-
 def send_password_reset_email(to_email: str, reset_link: str) -> EmailDeliveryResult:
     subject = "SafeLive Password Reset"
     intro = "A password reset request was received for your account."
@@ -216,8 +186,6 @@ def send_password_reset_email(to_email: str, reset_link: str) -> EmailDeliveryRe
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)
-
-
 def send_otp_email(to_email: str, otp: str, context: str, expires_minutes: int) -> EmailDeliveryResult:
     subject = "SafeLive Verification Code"
     intro = f"Use this one-time code to complete {context}."
@@ -232,8 +200,6 @@ def send_otp_email(to_email: str, otp: str, context: str, expires_minutes: int) 
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)
-
-
 def send_registration_email(to_email: str, name: str, user_type: str) -> EmailDeliveryResult:
     subject = "Welcome to SafeLive"
     display_name = (name or "User").strip()
@@ -249,8 +215,6 @@ def send_registration_email(to_email: str, name: str, user_type: str) -> EmailDe
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)
-
-
 def send_incident_submission_email(
     to_email: str,
     incident_id: str,
@@ -285,8 +249,6 @@ def send_incident_submission_email(
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)
-
-
 def send_ticket_update_email(to_email: str, title: str, status: str) -> EmailDeliveryResult:
     subject = "SafeLive Ticket Update"
     intro = "Your ticket status has changed."
@@ -299,8 +261,6 @@ def send_ticket_update_email(to_email: str, title: str, status: str) -> EmailDel
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)
-
-
 def send_field_inspector_reminder_email(
     to_email: str,
     inspector_name: str,
@@ -329,8 +289,6 @@ def send_field_inspector_reminder_email(
     )
     html_body = _render_email_frame(title=subject, intro=intro, details=details)
     return send_email(subject=subject, to_email=to_email, text_body=text_body, html_body=html_body)
-
-
 def send_critical_incident_review_email(
     *,
     to_email: str,
@@ -364,13 +322,11 @@ def send_critical_incident_review_email(
         if not str(label or "").strip():
             continue
         details.append((str(label), str(value or "N/A")))
-
     for idx, url in enumerate(image_urls or []):
         safe_url = str(url or "").strip()
         if not safe_url:
             continue
         details.append((f"Image {idx + 1}", safe_url))
-
     safe_approve = escape(approve_url)
     safe_reject = escape(reject_url)
     actions_html = (
@@ -386,7 +342,6 @@ def send_critical_incident_review_email(
         "This action link is secure and tied to this incident review request."
         "</p>"
     )
-
     detail_lines = "\n".join(f"{label}: {value}" for label, value in details)
     text_body = (
         f"Hi {reviewer},\n\n"

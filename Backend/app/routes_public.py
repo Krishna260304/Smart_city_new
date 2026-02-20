@@ -1,9 +1,7 @@
 from fastapi import APIRouter
 from app.database import incidents
 from app.utils import serialize_list
-
 router = APIRouter(prefix="/api/public")
-
 @router.get("/summary")
 def summary():
     total = incidents.count_documents({})
